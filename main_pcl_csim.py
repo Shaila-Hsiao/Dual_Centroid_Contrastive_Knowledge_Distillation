@@ -37,7 +37,7 @@ parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     help='model architecture: ' +
                          ' | '.join(model_names) +
                          ' (default: resnet50)')
-parser.add_argument('-j', '--workers', default=12, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=16, type=int, metavar='N',
                     help='number of data loading workers (default: 12)')
 parser.add_argument('--epochs', default=400, type=int, metavar='N',
                     help='number of total epochs to run')
@@ -97,7 +97,7 @@ parser.add_argument("--alpha", default=1, type=float, help="質心損失的權�
 
 def main():
     args = parser.parse_args()
-    wandb.init(project="PCL", config=args)
+    # wandb.init(project="PCL", config=args)
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -210,7 +210,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
     # 加載預訓練的老師模型權重
-    checkpoint_path = r"D:\Document\Project\contrastivelearnig\TEST\moco\checkpoint_0099.pth.tar"
+    checkpoint_path = r"C:\Users\k3866\Documents\PretrianedModel\Moco\checkpoint_0099.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location="cpu",weights_only=True)
     state_dict = checkpoint["state_dict"]
 
@@ -230,7 +230,17 @@ def main_worker(gpu, ngpus_per_node, args):
     teacher_model.eval()
 
     # # 計算類別質心
-    class_centroids = get_class_centroids(teacher_model, train_loader,gpu)
+    # 計算特徵維度
+    with torch.no_grad():
+        for images, _ in train_loader:
+            features = teacher_model.encoder_k(images[0].cuda())
+            feature_dim = features.shape[1]
+            print(f"Feature shape: {features.shape}")
+            break
+    num_classes = len(train_loader.dataset.classes)
+    class_centroids, class_counts = set_centroids(teacher_model, train_loader, num_classes, feature_dim)
+    print(f"Class centroids computed. Centroids shape: {class_centroids.shape}")
+    # class_centroids = get_class_centroids(teacher_model, train_loader,gpu)
     class_centroids = class_centroids.cuda(gpu)
     # print(f"class_centroids device: {class_centroids.device}")
 
@@ -336,6 +346,7 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
             if len(args.num_cluster) > 0:
                 loss_proto_value /= len(args.num_cluster)
                 total_loss_value += loss_proto_value
+                print(f"loss_proto_value: {loss_proto_value}, type: {type(loss_proto_value)}")
                 proto_losses.update(loss_proto_value.item(), images[0].size(0))
 
 
@@ -353,54 +364,72 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         if i % args.print_freq == 0:
             progress.display(i)
 
-    wandb.log({
-        "epoch": epoch,
-        "total_loss": total_losses.avg,
-        "info_nce_loss": info_losses.avg,
-        "proto_nce_loss": proto_losses.avg,
-        "centroid_loss": centroid_losses.avg,
-        "accuracy_inst": acc_inst.avg,
-        "accuracy_proto": acc_proto.avg,
-    })
+    # wandb.log({
+    #     "epoch": epoch,
+    #     "total_loss": total_losses.avg,
+    #     "info_nce_loss": info_losses.avg,
+    #     "proto_nce_loss": proto_losses.avg,
+    #     "centroid_loss": centroid_losses.avg,
+    #     "accuracy_inst": acc_inst.avg,
+    #     "accuracy_proto": acc_proto.avg,
+    # })
 
-def get_class_centroids(model, loader, device):
-    print("計算類別質心...")
-    centroids = {}
-    count = {}
+# def get_class_centroids(model, loader, device):
+#     print("計算類別質心...")
+#     centroids = {}
+#     count = {}
     
-    model.eval()
-    with torch.no_grad():
-        for images, target in tqdm(loader):
+#     model.eval()
+#     with torch.no_grad():
+#         for images, target in tqdm(loader):
             
-            # 明確將資料搬移到 GPU，並轉換為 CUDA Tensor
-            # images = images.cuda(device, non_blocking=True)
-            images = [img.cuda(device, non_blocking=True) for img in images]
-            # 使用 key encoder 提取特徵
-            features = model.encoder_k(images[0]).to(device)
+#             # 明確將資料搬移到 GPU，並轉換為 CUDA Tensor
+#             # images = images.cuda(device, non_blocking=True)
+#             images = [img.cuda(device, non_blocking=True) for img in images]
+#             # 使用 key encoder 提取特徵
+#             features = model.encoder_k(images[0]).to(device)
             
-            for feature, label in zip(features, target):
-                label = label.item()
-                if label not in centroids:
-                    centroids[label] = feature.cpu()
-                    count[label] = 1
-                else:
-                    centroids[label] += feature.cpu()
-                    count[label] += 1
+#             for feature, label in zip(features, target):
+#                 label = label.item()
+#                 if label not in centroids:
+#                     centroids[label] = feature.cpu()
+#                     count[label] = 1
+#                 else:
+#                     centroids[label] += feature.cpu()
+#                     count[label] += 1
 
-    # 計算每個類別的平均值
-    for label in centroids:
-        centroids[label] /= count[label]
-    class_centroids = torch.stack([centroids[key] for key in sorted(centroids.keys())]).to(device)
-    # 在此插入檢查代碼
-    # print(f"[DEBUG] Teacher model output feature dimension: {features.shape[-1]}")
-    # print(f"Features device: {features.device}")
-    # print(f"Class centroids device: {class_centroids.device}")
-    return class_centroids
+#     # 計算每個類別的平均值
+#     for label in centroids:
+#         centroids[label] /= count[label]
+#     class_centroids = torch.stack([centroids[key] for key in sorted(centroids.keys())]).to(device)
+#     # 在此插入檢查代碼
+#     # print(f"[DEBUG] Teacher model output feature dimension: {features.shape[-1]}")
+#     # print(f"Features device: {features.device}")
+#     # print(f"Class centroids device: {class_centroids.device}")
+#     return class_centroids
+def set_centroids(teacher_model, train_loader, num_classes, feature_dim):
+    print('Computing Centroid via SSLCon model...')
+    centroids = torch.zeros(num_classes, feature_dim).cuda()
+    counts = torch.zeros(num_classes).cuda()
+    with torch.no_grad():
+        progress_bar = tqdm(train_loader, desc="Computing Centroids")
+        for idx, (images, labels) in enumerate(progress_bar):
+            progress_bar.set_description(f"[{idx + 1}/{len(train_loader)}]")
+            image = images[0].cuda()
+            labels = labels.cuda()
+            features = teacher_model.encoder_k(image)
+            for i in range(num_classes):
+                mask = labels == i
+                centroids[i] += features[mask].sum(dim=0)
+                counts[i] += mask.sum()
+    centroids /= counts.unsqueeze(1)
+    centroids = F.normalize(centroids, dim=-1)
+    return centroids, counts
+
 def cosine_similarity_matrix(z_q, class_centroids, eps=1e-8):
     # 正規化
     z_q_norm = F.normalize(z_q, p=2, dim=1)
     class_centroids_norm = F.normalize(class_centroids, p=2, dim=1)
-
     # 矩陣乘法計算餘弦相似度
     return torch.matmul(z_q_norm, class_centroids_norm.t())
 
@@ -529,6 +558,7 @@ def adjust_learning_rate(optimizer, epoch, args):
 
 def accuracy(output, target, topk=(1,)):
     with torch.no_grad():
+        print("output shape:",output.shape)
         maxk = max(topk)
         batch_size = target.size(0)
 
