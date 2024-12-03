@@ -18,8 +18,8 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
-import tensorboard_logger as tb_logger
-
+# import tensorboard_logger as tb_logger
+import wandb
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -68,7 +68,7 @@ parser.add_argument('--dist-backend', default='nccl', type=str,
                     help='distributed backend')
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
-parser.add_argument('--gpu', default=None, type=int,
+parser.add_argument('--gpu', default=0, type=int,
                     help='GPU id to use.')
 parser.add_argument('--multiprocessing-distributed', action='store_true',
                     help='Use multi-processing distributed training to launch '
@@ -83,7 +83,7 @@ parser.add_argument('--id', type=str, default='')
 
 def main():
     args = parser.parse_args()
-
+    wandb.init(project="Baseline",config=args)
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -143,7 +143,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 world_size=args.world_size, rank=args.rank)
     # create model
     print("=> creating model '{}'".format(args.arch))
-    model = models.__dict__[args.arch]()
+    model = models.__dict__[args.arch](num_classes=200)
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
@@ -153,16 +153,16 @@ def main_worker(gpu, ngpus_per_node, args):
     model.fc.weight.data.normal_(mean=0.0, std=0.01)
     model.fc.bias.data.zero_()
     
-    if args.gpu==0:
-        logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
-    else:
-        logger = None
+    # if args.gpu==0:
+    #     logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
+    # else:
+    #     logger = None
         
     # load from pre-trained, before DistributedDataParallel constructor
     if args.pretrained:
         if os.path.isfile(args.pretrained):
             print("=> loading checkpoint '{}'".format(args.pretrained))
-            checkpoint = torch.load(args.pretrained, map_location="cpu")
+            checkpoint = torch.load(args.pretrained, map_location="cpu",weights_only = True)
 
             # rename pre-trained keys
             state_dict = checkpoint['state_dict']
@@ -250,7 +250,7 @@ def main_worker(gpu, ngpus_per_node, args):
     train_dataset = datasets.ImageFolder(
         traindir,
         transforms.Compose([
-            transforms.RandomResizedCrop(224),
+            transforms.RandomResizedCrop(64),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
@@ -267,8 +267,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
     val_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
             transforms.ToTensor(),
             normalize,
         ])),
@@ -288,7 +288,8 @@ def main_worker(gpu, ngpus_per_node, args):
         train(train_loader, model, criterion, optimizer, epoch, args)
 
         # evaluate on validation set
-        acc1 = validate(val_loader, model, criterion, args, logger, epoch)
+        # acc1 = validate(val_loader, model, criterion, args, logger, epoch)
+        acc1 = validate(val_loader, model, criterion, args, epoch)
 
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
@@ -352,9 +353,14 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
+    wandb.log({
+        "training_loss": losses.avg,
+        "training_acc1":top1.avg,
+        "training_acc5":top5.avg,
+    })
 
-
-def validate(val_loader, model, criterion, args, logger, epoch):
+# def validate(val_loader, model, criterion, args, logger, epoch):
+def validate(val_loader, model, criterion, args, epoch):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -394,9 +400,15 @@ def validate(val_loader, model, criterion, args, logger, epoch):
         # TODO: this should also be done with the ProgressMeter
         print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
-    if args.gpu==0:    
-        logger.log_value('test_acc', top1.avg, epoch)
-        logger.log_value('test_acc5', top5.avg, epoch)
+    # if args.gpu==0:    
+    #     logger.log_value('test_acc', top1.avg, epoch)
+    #     logger.log_value('test_acc5', top5.avg, epoch)
+        wandb.log({
+            "epoch":epoch+1,
+            "validate_loss": losses.avg,
+            "validate_acc1":top1.avg,
+            "validate_acc5":top5.avg,
+        })
     return top1.avg
 
 
@@ -410,18 +422,40 @@ def sanity_check(state_dict, pretrained_weights):
     This sanity check asserts nothing wrong happens (e.g., BN stats updated).
     """
     print("=> loading '{}' for sanity check".format(pretrained_weights))
-    checkpoint = torch.load(pretrained_weights, map_location="cpu")
+    checkpoint = torch.load(pretrained_weights, map_location="cpu",weights_only = True)
     state_dict_pre = checkpoint['state_dict']
 
+    # rename pre-trained keys
+    for k in list(state_dict_pre.keys()):
+        # retain only encoder_q up to before the embedding layer
+        if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
+            # remove prefix
+            state_dict_pre[k[len("module.encoder_q."):]] = state_dict_pre[k]
+        # delete renamed or unused k
+        del state_dict_pre[k]
+    
+    print("Keys in the Pretrained state_dict:\n")
+    for key in state_dict_pre.keys():
+        print(key)
+    print("==================================================================")
+    
+    print("Keys in the state_dict:\n")
+    for key in state_dict.keys():
+        print(key)
     for k in list(state_dict.keys()):
         # only ignore fc layer
         if 'fc.weight' in k or 'fc.bias' in k:
             continue
-        # name in pretrained model
-        k_pre = 'module.encoder_q.' + k[len('module.'):] \
-            if k.startswith('module.') else 'module.encoder_q.' + k
+        
+        # # name in pretrained model
+        # k_pre = 'encoder_q.' + k[len('module.'):] if k.startswith('module.') else 'encoder_q.' + k
 
-        assert ((state_dict[k].cpu() == state_dict_pre[k_pre]).all()), \
+        # # 印出比較的參數名稱和數值
+        # print(f"Comparing parameter '{k}' with '{k_pre}'")
+        # print("state_dict[k]:", state_dict[k].cpu())
+        # print("state_dict_pre[k_pre]:", state_dict_pre[k].cpu())
+            
+        assert ((state_dict[k].cpu() == state_dict_pre[k]).all()), \
             '{} is changed in linear classifier training.'.format(k)
     
     print("=> sanity check passed.")
@@ -489,7 +523,8 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
-            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            # correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
 
