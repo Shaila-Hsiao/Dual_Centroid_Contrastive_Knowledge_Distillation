@@ -423,7 +423,7 @@ def sanity_check(state_dict, pretrained_weights):
 
         assert ((state_dict[k].cpu() == state_dict_pre[k_pre]).all()), \
             '{} is changed in linear classifier training.'.format(k)
-
+    
     print("=> sanity check passed.")
 
 
