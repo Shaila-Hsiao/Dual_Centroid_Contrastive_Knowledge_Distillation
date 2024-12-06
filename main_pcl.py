@@ -29,7 +29,7 @@ model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+parser = argparse.ArgumentParser(description='PCL TinyImageNet Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
@@ -97,14 +97,14 @@ parser.add_argument('--cos', action='store_true',
 
 parser.add_argument('--num-cluster', default='1000,1500,2000', type=str, 
                     help='number of clusters')
-parser.add_argument('--warmup-epoch', default=1, type=int,
+parser.add_argument('--warmup-epoch', default=10, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
 parser.add_argument('--exp-dir', default='checkpoint/pcl/train', type=str,
                     help='experiment directory')
 
 def main():
     args = parser.parse_args()
-    # wandb.init(project="Baseline", config=args)
+    wandb.init(project="PCL", config=args)
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -392,14 +392,14 @@ def train(train_loader, model, criterion, optimizer, epoch, args, cluster_result
         if i % args.print_freq == 0:
             progress.display(i)
 
-    # wandb.log({
-    #     "epoch": epoch,
-    #     "total_loss": total_losses.avg,
-    #     "info_nce_loss": info_losses.avg,
-    #     "proto_nce_loss": proto_losses.avg,
-    #     "accuracy_inst": acc_inst.avg,
-    #     "accuracy_proto": acc_proto.avg,
-    # })
+    wandb.log({
+        "epoch": epoch,
+        "total_loss": total_losses.avg,
+        "info_nce_loss": info_losses.avg,
+        "proto_nce_loss": proto_losses.avg,
+        "accuracy_inst": acc_inst.avg,
+        "accuracy_proto": acc_proto.avg,
+    })
 
 def compute_features(eval_loader, model, args):
     print('Computing features...')
