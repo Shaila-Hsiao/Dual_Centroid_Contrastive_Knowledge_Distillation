@@ -135,11 +135,10 @@ class MoCo(nn.Module):
 
             k = self.encoder_k(im_k)  # keys: NxC
             k = nn.functional.normalize(k, dim=1)
-
         # compute query features
         q = self.encoder_q(im_q)  # queries: NxC
         q = nn.functional.normalize(q, dim=1)
-
+        student_key = q
         # compute logits
         # Einstein sum is more intuitive
         # positive logits: Nx1
@@ -186,7 +185,7 @@ class MoCo(nn.Module):
                 neg_prototypes = prototypes[neg_proto_id]    
 
                 proto_selected = torch.cat([pos_prototypes,neg_prototypes],dim=0)
-                print(f"proto_selected shape: {proto_selected.shape}")
+                #print(f"proto_selected shape: {proto_selected.shape}")
                 
                 # compute prototypical logits
                 logits_proto = torch.mm(q,proto_selected.t())
@@ -200,9 +199,9 @@ class MoCo(nn.Module):
                 
                 proto_labels.append(labels_proto)
                 proto_logits.append(logits_proto)
-            return logits, labels, proto_logits, proto_labels
+            return logits, labels,student_key,proto_logits, proto_labels
         else:
-            return logits, labels, None, None
+            return logits, labels,student_key, None, None
 
 
 # utils
