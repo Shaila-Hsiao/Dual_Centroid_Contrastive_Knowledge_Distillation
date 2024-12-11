@@ -20,6 +20,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 # import tensorboard_logger as tb_logger
 import wandb
+from tqdm import tqdm
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -68,7 +69,7 @@ parser.add_argument('--dist-backend', default='nccl', type=str,
                     help='distributed backend')
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training. ')
-parser.add_argument('--gpu', default=0, type=int,
+parser.add_argument('--gpu', default=None, type=int,
                     help='GPU id to use.')
 parser.add_argument('--multiprocessing-distributed', action='store_true',
                     help='Use multi-processing distributed training to launch '
@@ -80,10 +81,15 @@ parser.add_argument('--pretrained', default='', type=str,
                     help='path to pretrained checkpoint')
 parser.add_argument('--id', type=str, default='')
 
+# dataset setting 
+parser.add_argument("--dataset", default="TinyImageNet", help="dataset")
+parser.add_argument("--size" ,default=64, help="Image size")
+parser.add_argument("--num-classes" ,default=200, type=int)
+
 
 def main():
     args = parser.parse_args()
-    wandb.init(project="Baseline",config=args)
+    wandb.init(project="Baseline",config=args,name=f"Cls_{args.id}_{args.arch}_{args.dataset}_{args.epochs}")
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -141,10 +147,21 @@ def main_worker(gpu, ngpus_per_node, args):
             args.rank = args.rank * ngpus_per_node + gpu
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size, rank=args.rank)
+    
     # create model
     print("=> creating model '{}'".format(args.arch))
-    model = models.__dict__[args.arch](num_classes=200)
+    if args.dataset == "TinyImageNet":
+        args.num_classes = 200
+    elif args.dataset == "CIFAR10":
+        args.num_classes = 10
+        
+    elif args.dataset == "CIFAR100":
+        args.num_classes = 100
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+    wandb.config.update({"num-cluster": args.num_cluster}, allow_val_change=True)
 
+    model = models.__dict__[args.arch](num_classes=args.num_classes)
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
         if name not in ['fc.weight', 'fc.bias']:
@@ -154,23 +171,23 @@ def main_worker(gpu, ngpus_per_node, args):
     model.fc.bias.data.zero_()
     
     # if args.gpu==0:
-    #     logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
+        # logger = tb_logger.Logger(logdir=args.tb_folder, flush_secs=2)
     # else:
-    #     logger = None
+    logger = None
         
     # load from pre-trained, before DistributedDataParallel constructor
     if args.pretrained:
         if os.path.isfile(args.pretrained):
             print("=> loading checkpoint '{}'".format(args.pretrained))
-            checkpoint = torch.load(args.pretrained, map_location="cpu",weights_only = True)
+            checkpoint = torch.load(args.pretrained, map_location="cpu")
 
             # rename pre-trained keys
             state_dict = checkpoint['state_dict']
             for k in list(state_dict.keys()):
                 # retain only encoder_q up to before the embedding layer
-                if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
+                if k.startswith('encoder_q') and not k.startswith('encoder_q.fc'):
                     # remove prefix
-                    state_dict[k[len("module.encoder_q."):]] = state_dict[k]
+                    state_dict[k[len("encoder_q."):]] = state_dict[k]
                 # delete renamed or unused k
                 del state_dict[k]
 
@@ -242,20 +259,108 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     # Data loading code
-    traindir = os.path.join(args.data, 'train')
-    valdir = os.path.join(args.data, 'val')
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+    # traindir = os.path.join(args.data, 'train')
+    # valdir = os.path.join(args.data, 'val')
+    # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+    #                                  std=[0.229, 0.224, 0.225])
 
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        transforms.Compose([
-            transforms.RandomResizedCrop(64),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ]))
+    # train_dataset = datasets.ImageFolder(
+    #     traindir,
+    #     transforms.Compose([
+    #         transforms.RandomResizedCrop(64),
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.ToTensor(),
+    #         normalize,
+    #     ]))
+    # Data loading code
+    
+    # ---- 加入 dataset 設定邏輯 ---- #
+    if args.dataset == "TinyImageNet":
+        args.size = 64
+        traindir = os.path.join(args.data, "train")
+        valdir = os.path.join(args.data, 'val')
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+        train_dataset = datasets.ImageFolder(
+            traindir,
+            transforms.Compose([
+                transforms.RandomResizedCrop(args.size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ]))
+        val_dataset = datasets.ImageFolder(
+            valdir,
+            transforms.Compose([
+                transforms.Resize(args.size),
+                transforms.CenterCrop(args.size),
+                transforms.ToTensor(),
+                normalize,
+            ]))
+    elif args.dataset == "CIFAR10":
+        args.size = 32
+        traindir = os.path.join(args.data)
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+        train_dataset = datasets.CIFAR10(
+            root=traindir,
+            train=True,
+            download=True,
+            transform= transforms.Compose([
+                transforms.RandomResizedCrop(args.size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        val_dataset = datasets.CIFAR10(
+            root=traindir,
+            train=False,
+            download=True,
+            transform=transforms.Compose([
+                transforms.Resize(args.size),
+                transforms.CenterCrop(args.size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
 
+    elif args.dataset == "CIFAR100":
+        args.size = 32
+        traindir = os.path.join(args.data)
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+        train_dataset = datasets.CIFAR100(
+            root=traindir,
+            train=True,
+            download=True,
+            transform= transforms.Compose([
+                transforms.RandomResizedCrop(args.size),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        val_dataset = datasets.CIFAR100(
+            root=traindir,
+            train=False,
+            download=True,
+            transform=transforms.Compose([
+                transforms.Resize(args.size),
+                transforms.CenterCrop(args.size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+    wandb.config.update({"size": args.size}, allow_val_change=True)
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
@@ -266,14 +371,8 @@ def main_worker(gpu, ngpus_per_node, args):
         num_workers=args.workers, pin_memory=True, sampler=train_sampler)
 
     val_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(valdir, transforms.Compose([
-            transforms.Resize(64),
-            transforms.CenterCrop(64),
-            transforms.ToTensor(),
-            normalize,
-        ])),
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+       val_dataset,batch_size=args.batch_size, shuffle=False,
+       num_workers=args.workers, pin_memory=True)
 
     if args.evaluate:
         validate(val_loader, model, criterion, args)
@@ -285,12 +384,19 @@ def main_worker(gpu, ngpus_per_node, args):
         adjust_learning_rate(optimizer, epoch, args)
 
         # train for one epoch
-        train(train_loader, model, criterion, optimizer, epoch, args)
+        train_loss,train_acc1,train_acc5 = train(train_loader, model, criterion, optimizer, epoch, args)
 
         # evaluate on validation set
-        # acc1 = validate(val_loader, model, criterion, args, logger, epoch)
-        acc1 = validate(val_loader, model, criterion, args, epoch)
-
+        eval_loss,eval_acc1,eval_acc5 = validate(val_loader, model, criterion, args, epoch)
+        wandb.log({
+            "epoch":epoch,
+            "training_loss":train_loss,
+            "training_acc1":train_acc1,
+            "training_acc5":train_acc5,
+            "validate_loss":eval_loss,
+            "validate_acc1":eval_acc1,
+            "validate_acc5":eval_acc5,
+        })
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             save_checkpoint({
@@ -313,7 +419,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
         len(train_loader),
         [batch_time, data_time, losses, top1, top5],
         prefix="Epoch: [{}]".format(epoch))
-
+    epoch_iterator = tqdm(train_loader, desc=f"Epoch {epoch}", unit="batch")
     """
     Switch to eval mode:
     Under the protocol of linear classification on frozen features/models,
@@ -324,7 +430,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     model.eval()
 
     end = time.time()
-    for i, (images, target) in enumerate(train_loader):
+    for i, (images, target) in enumerate(epoch_iterator):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -353,14 +459,9 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
-    wandb.log({
-        "training_loss": losses.avg,
-        "training_acc1":top1.avg,
-        "training_acc5":top5.avg,
-    })
+    return losses.avg,top1.avg,top5.avg
 
-# def validate(val_loader, model, criterion, args, logger, epoch):
-def validate(val_loader, model, criterion, args, epoch):
+def validate(val_loader, model, criterion, args,  epoch):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -369,13 +470,13 @@ def validate(val_loader, model, criterion, args, epoch):
         len(val_loader),
         [batch_time, losses, top1, top5],
         prefix='Test: ')
-
+    epoch_iterator = tqdm(val_loader, desc=f"Epoch {epoch}", unit="batch")
     # switch to evaluate mode
     model.eval()
 
     with torch.no_grad():
         end = time.time()
-        for i, (images, target) in enumerate(val_loader):
+        for i, (images, target) in enumerate(epoch_iterator):
             if args.gpu is not None:
                 images = images.cuda(args.gpu, non_blocking=True)
             target = target.cuda(args.gpu, non_blocking=True)
@@ -403,13 +504,7 @@ def validate(val_loader, model, criterion, args, epoch):
     # if args.gpu==0:    
     #     logger.log_value('test_acc', top1.avg, epoch)
     #     logger.log_value('test_acc5', top5.avg, epoch)
-        wandb.log({
-            "epoch":epoch+1,
-            "validate_loss": losses.avg,
-            "validate_acc1":top1.avg,
-            "validate_acc5":top5.avg,
-        })
-    return top1.avg
+    return losses.avg,top1.avg,top5.avg
 
 
 def save_checkpoint(state, filename='checkpoint.pth.tar'):
@@ -421,44 +516,47 @@ def sanity_check(state_dict, pretrained_weights):
     Linear classifier should not change any weights other than the linear layer.
     This sanity check asserts nothing wrong happens (e.g., BN stats updated).
     """
+    # print("=> loading '{}' for sanity check".format(pretrained_weights))
+    # checkpoint = torch.load(pretrained_weights, map_location="cpu")
+    # state_dict_pre = checkpoint['state_dict']
+
+    # for k in list(state_dict.keys()):
+    #     # only ignore fc layer
+    #     if 'fc.weight' in k or 'fc.bias' in k:
+    #         continue
+    #     # name in pretrained model
+    #     k_pre = 'module.encoder_q.' + k[len('module.'):] \
+    #         if k.startswith('module.') else 'module.encoder_q.' + k
+
+    #     assert ((state_dict[k].cpu() == state_dict_pre[k_pre]).all()), \
+    #         '{} is changed in linear classifier training.'.format(k)
+
+    # print("=> sanity check passed.")
+
     print("=> loading '{}' for sanity check".format(pretrained_weights))
-    checkpoint = torch.load(pretrained_weights, map_location="cpu",weights_only = True)
+    checkpoint = torch.load(pretrained_weights, map_location="cpu")
     state_dict_pre = checkpoint['state_dict']
 
-    # rename pre-trained keys
-    for k in list(state_dict_pre.keys()):
-        # retain only encoder_q up to before the embedding layer
-        if k.startswith('module.encoder_q') and not k.startswith('module.encoder_q.fc'):
-            # remove prefix
-            state_dict_pre[k[len("module.encoder_q."):]] = state_dict_pre[k]
-        # delete renamed or unused k
-        del state_dict_pre[k]
-    
-    print("Keys in the Pretrained state_dict:\n")
-    for key in state_dict_pre.keys():
-        print(key)
-    print("==================================================================")
-    
-    print("Keys in the state_dict:\n")
-    for key in state_dict.keys():
-        print(key)
     for k in list(state_dict.keys()):
         # only ignore fc layer
         if 'fc.weight' in k or 'fc.bias' in k:
             continue
-        
-        # # name in pretrained model
-        # k_pre = 'encoder_q.' + k[len('module.'):] if k.startswith('module.') else 'encoder_q.' + k
 
-        # # 印出比較的參數名稱和數值
-        # print(f"Comparing parameter '{k}' with '{k_pre}'")
-        # print("state_dict[k]:", state_dict[k].cpu())
-        # print("state_dict_pre[k_pre]:", state_dict_pre[k].cpu())
-            
-        assert ((state_dict[k].cpu() == state_dict_pre[k]).all()), \
+        # Modify the key to match the naming in state_dict_pre
+        if k.startswith('module.'):
+            k_pre = 'encoder_q.' + k[len('module.'):]
+        else:
+            k_pre = 'encoder_q.' + k
+
+        if k_pre not in state_dict_pre:
+            raise KeyError(f"Key {k_pre} not found in pretrained state_dict.")
+
+        # Perform sanity check to ensure the weights match
+        assert ((state_dict[k].cpu() == state_dict_pre[k_pre]).all()), \
             '{} is changed in linear classifier training.'.format(k)
-    
+
     print("=> sanity check passed.")
+
 
 
 class AverageMeter(object):
@@ -523,7 +621,6 @@ def accuracy(output, target, topk=(1,)):
 
         res = []
         for k in topk:
-            # correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
