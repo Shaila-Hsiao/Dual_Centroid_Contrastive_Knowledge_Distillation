@@ -79,7 +79,7 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 
 parser.add_argument('--pretrained', default='', type=str,
                     help='path to pretrained checkpoint')
-parser.add_argument('--id', type=str, default='')
+parser.add_argument('--id', type=str, default='Task')
 
 # dataset setting 
 parser.add_argument("--dataset", default="TinyImageNet", help="dataset")

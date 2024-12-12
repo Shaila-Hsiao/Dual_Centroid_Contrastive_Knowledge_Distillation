@@ -90,7 +90,7 @@ parser.add_argument('--exp-dir', default='pth_pcl', type=str,
 # dataset setting 
 parser.add_argument("--dataset", default="TinyImageNet", help="dataset")
 parser.add_argument("--size" ,default=64, help="Image size")
-parser.add_argument('--id', type=str, default='')
+parser.add_argument('--id', type=str, default='Task')
 
 
 def main():
