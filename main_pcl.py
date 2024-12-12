@@ -118,7 +118,7 @@ def main():
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    wandb.config.update({"num-cluster": args.num_cluster,"pcl-r": args.pcl_r}, allow_val_change=True)
+    wandb.config.update({"num_cluster": args.num_cluster,"pcl-r": args.pcl_r}, allow_val_change=True)
     args.num_cluster = args.num_cluster.split(',')
     if not os.path.exists(args.exp_dir):
         os.mkdir(args.exp_dir)

@@ -159,7 +159,7 @@ def main_worker(gpu, ngpus_per_node, args):
         args.num_classes = 100
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
-    wandb.config.update({"num-cluster": args.num_cluster}, allow_val_change=True)
+    wandb.config.update({"num_classes": args.num_classes}, allow_val_change=True)
 
     model = models.__dict__[args.arch](num_classes=args.num_classes)
     # freeze all layers but the last fc
