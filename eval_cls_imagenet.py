@@ -79,13 +79,14 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
 
 parser.add_argument('--pretrained', default='', type=str,
                     help='path to pretrained checkpoint')
-parser.add_argument('--id', type=str, default='Task')
+parser.add_argument('--id', type=str, default='')
 
 # dataset setting 
 parser.add_argument("--dataset", default="TinyImageNet", help="dataset")
 parser.add_argument("--size" ,default=64, help="Image size")
 parser.add_argument("--num-classes" ,default=200, type=int)
-
+parser.add_argument('--exp-dir', default='experiment_pcl', type=str,
+                    help='experiment directory')
 
 def main():
     args = parser.parse_args()
@@ -99,6 +100,9 @@ def main():
                       'which can slow down your training considerably! '
                       'You may see unexpected behavior when restarting '
                       'from checkpoints.')
+    
+    if not os.path.exists(args.exp_dir):
+        os.mkdir(args.exp_dir)
 
     if args.gpu is not None:
         warnings.warn('You have chosen a specific GPU. This will completely '
@@ -404,7 +408,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-            })
+            },is_best=False, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
 
@@ -507,9 +511,12 @@ def validate(val_loader, model, criterion, args,  epoch):
     return losses.avg,top1.avg,top5.avg
 
 
-def save_checkpoint(state, filename='checkpoint.pth.tar'):
+# def save_checkpoint(state, filename='checkpoint.pth.tar'):
+#     torch.save(state, filename)
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
-
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
 
 def sanity_check(state_dict, pretrained_weights):
     """
