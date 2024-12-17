@@ -82,7 +82,7 @@ parser.add_argument('--cos', action='store_true',
 
 parser.add_argument('--num-cluster', default='500,1000,2000', type=str,  
                     help='number of clusters')
-parser.add_argument('--warmup-epoch', default=1, type=int,
+parser.add_argument('--warmup-epoch', default=10, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
 parser.add_argument('--exp-dir', default='pth_pcl', type=str,
                     help='experiment directory')
@@ -90,8 +90,8 @@ parser.add_argument('--exp-dir', default='pth_pcl', type=str,
 # dataset setting 
 parser.add_argument("--dataset", default="TinyImageNet", help="dataset")
 parser.add_argument("--size" ,default=64, help="Image size")
-parser.add_argument('--id', type=str, default='Task')
-
+parser.add_argument('--id', type=str, default='')
+parser.add_argument("--num-classes" ,default=200, type=int)
 
 def main():
     args = parser.parse_args()
@@ -105,20 +105,22 @@ def main():
     if args.gpu is not None:
         warnings.warn('You have chosen a specific GPU. This will completely '
                       'disable data parallelism.')
-
+        
     if args.dataset == "TinyImageNet":
         args.num_cluster = "200,500,1000"
         args.pcl_r = 16384
+        args.num_classes = 200
     elif args.dataset == "CIFAR10":
         args.num_cluster = "10,50,100"
         args.pcl_r = 1024
     elif args.dataset == "CIFAR100":
         args.num_cluster = "100,250,500"
         args.pcl_r = 4096
+        args.num_classes = 100
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
+    wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
-    wandb.config.update({"num_cluster": args.num_cluster,"pcl-r": args.pcl_r}, allow_val_change=True)
     args.num_cluster = args.num_cluster.split(',')
     if not os.path.exists(args.exp_dir):
         os.mkdir(args.exp_dir)
@@ -187,7 +189,7 @@ def main_worker(gpu, ngpus_per_node, args):
         )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
-
+    
     wandb.config.update({"size": args.size}, allow_val_change=True)
     # traindir = os.path.join(args.data, 'train')
     # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -275,10 +277,10 @@ def main_worker(gpu, ngpus_per_node, args):
         num_workers=args.workers, pin_memory=True)
 
     # ---- 檢查資料是否正確載入 ---- #
-    print("Dataset:",args.dataset)
-    print("image size:",args.size)
-    print(f"Train dataset size: {len(train_dataset)}")
-    print(f"Eval dataset size: {len(eval_dataset)}")
+    # print("Dataset:",args.dataset)
+    # print("image size:",args.size)
+    # print(f"Train dataset size: {len(train_dataset)}")
+    # print(f"Eval dataset size: {len(eval_dataset)}")
     
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -390,7 +392,7 @@ def run_kmeans(x, args):
         clus.niter = 20
         clus.nredo = 5
         clus.seed = seed
-        clus.max_points_per_centroid = 100
+        clus.max_points_per_centroid = args.num_classes
         clus.min_points_per_centroid = 10
 
         res = faiss.StandardGpuResources()

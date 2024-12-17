@@ -70,7 +70,7 @@ parser.add_argument('--gpu', default=0, type=int,
 parser.add_argument('--low-dim', default=128, type=int,
                     help='feature dimension (default: 128)')
 # parser.add_argument('--pcl-r', default=16384, type=int,
-parser.add_argument('--pcl-r', default=256, type=int,
+parser.add_argument('--pcl-r', default=16384, type=int,
                     help='queue size; number of negative pairs (default: 16384)')
 parser.add_argument('--moco-m', default=0.999, type=float,
                     help='moco momentum of updating key encoder (default: 0.999)')
@@ -108,10 +108,16 @@ parser.add_argument('--proportion', default=0.1, type=float,
 parser.add_argument('--kd_temperature', default=1, type=float,
                     help='Temperature scaling factor for knowledge distillation.')
 
+# dataset setting 
+parser.add_argument("--dataset", default="TinyImageNet", help="dataset")
+parser.add_argument("--size" ,default=64, help="Image size")
+parser.add_argument('--id', type=str, default='')
+parser.add_argument("--num-classes" ,default=200, type=int)
 
 def main():
     args = parser.parse_args()
-    wandb.init(project="PCL", config=args)
+    # id(task)_arch_dataset_epochs
+    wandb.init(project="Baseline", config=args, name=f"Pretrained_{args.id}_{args.arch}_{args.dataset}_{args.epochs}")
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -121,6 +127,22 @@ def main():
     # if args.gpu is not None:
     #     warnings.warn('You have chosen a specific GPU. This will completely '
     #                   'disable data parallelism.')
+    if args.dataset == "TinyImageNet":
+        args.num_cluster = "200,500,1000"
+        args.pcl_r = 16384
+        args.num_classes = 200
+    elif args.dataset == "CIFAR10":
+        args.num_cluster = "10,50,100"
+        args.pcl_r = 1024
+        args.num_classes = 10
+    elif args.dataset == "CIFAR100":
+        args.num_cluster = "100,250,500"
+        args.pcl_r = 4096
+        args.num_classes = 100
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+
+    wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
     args.num_cluster = args.num_cluster.split(',')
     if not os.path.exists(args.exp_dir):
@@ -175,13 +197,39 @@ def main_worker(gpu, ngpus_per_node, args):
 
     cudnn.benchmark = True
 
-    traindir = os.path.join(args.data, 'train')
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+
+    # ---- 加入 dataset 設定邏輯 ---- #
+    if args.dataset == "TinyImageNet":
+        args.size = 64
+        traindir = os.path.join(args.data, "train")
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    elif args.dataset == "CIFAR10":
+        args.size = 32
+        traindir = os.path.join(args.data)
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    elif args.dataset == "CIFAR100":
+        args.size = 32
+        traindir = os.path.join(args.data)
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+    wandb.config.update({"size": args.size}, allow_val_change=True)
+    # traindir = os.path.join(args.data, 'train')
+    # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+    #                                  std=[0.229, 0.224, 0.225])
 
     if args.aug_plus:
         augmentation = [
-            transforms.RandomResizedCrop(64, scale=(0.2, 1.)),
+            transforms.RandomResizedCrop(args.size, scale=(0.2, 1.)),
             transforms.RandomApply([
                 transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
             ], p=0.8),
@@ -193,7 +241,7 @@ def main_worker(gpu, ngpus_per_node, args):
         ]
     else:
         augmentation = [
-            transforms.RandomResizedCrop(64, scale=(0.2, 1.)),
+            transforms.RandomResizedCrop(args.size, scale=(0.2, 1.)),
             transforms.RandomGrayscale(p=0.2),
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
             transforms.RandomHorizontalFlip(),
@@ -202,18 +250,58 @@ def main_worker(gpu, ngpus_per_node, args):
         ]
 
     eval_augmentation = transforms.Compose([
-        transforms.Resize(64),
-        transforms.CenterCrop(64),
+        transforms.Resize(args.size),
+        transforms.CenterCrop(args.size),
         transforms.ToTensor(),
         normalize
     ])
 
-    train_dataset = pcl.loader.ImageFolderInstance(
-        traindir,
-        pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
-    eval_dataset = pcl.loader.ImageFolderInstance(
-        traindir,
-        eval_augmentation)
+    # train_dataset = pcl.loader.ImageFolderInstance(
+    #     traindir,
+    #     pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
+    # eval_dataset = pcl.loader.ImageFolderInstance(
+    #     traindir,
+    #     eval_augmentation)
+
+    if args.dataset == "TinyImageNet":
+        train_dataset = pcl.loader.ImageFolderInstance(
+            traindir,
+            pcl.loader.TwoCropsTransform(transforms.Compose(augmentation)))
+        eval_dataset = pcl.loader.ImageFolderInstance(
+            traindir,
+            eval_augmentation)
+
+    elif args.dataset == "CIFAR10":
+        train_dataset = datasets.CIFAR10(
+            root=traindir,
+            train=True,
+            download=True,
+            transform=pcl.loader.TwoCropsTransform(transforms.Compose(augmentation))
+        )
+        eval_dataset = datasets.CIFAR10(
+            root=traindir,
+            train=False,
+            download=True,
+            transform=eval_augmentation
+        )
+        
+    elif args.dataset == "CIFAR100":
+        train_dataset = datasets.CIFAR100(
+            root=traindir,
+            train=True,
+            download=True,
+            transform=pcl.loader.TwoCropsTransform(transforms.Compose(augmentation))
+        )
+        eval_dataset = datasets.CIFAR100(
+            root=traindir,
+            train=False,
+            download=True,
+            transform=eval_augmentation
+        )
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
+
+
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True,
@@ -230,15 +318,21 @@ def main_worker(gpu, ngpus_per_node, args):
     # checkpoint_path = r"C:\Users\k3866\Documents\PretrianedModel\Moco\checkpoint_0099.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location="cpu",weights_only=True)
     state_dict = checkpoint["state_dict"]
-
+    # Print all keys in the state_dict
+    print("Keys in the state_dict:")
+    for key in state_dict.keys():
+        print(key)
     # 處理權重名稱
     new_state_dict = {}
     for k in list(state_dict.keys()):
-        if k.startswith("encoder_q"):
+        if k.startswith("encoder_q."):
             new_state_dict[f"encoder_q.{k[len('encoder_q.'):]}"] = state_dict[k]
-        elif k.startswith("encoder_k"):
+        elif k.startswith("encoder_k."):
             new_state_dict[f"encoder_k.{k[len('encoder_k.'):]}"] = state_dict[k]
-
+    # Print all keys in the state_dict
+    print("Keys in the  new state_dict:")
+    for key in new_state_dict.keys():
+        print(key)
     # 加載權重到老師模型
     msg = teacher_model.load_state_dict(new_state_dict, strict=False)
     print(f"Missing keys: {msg.missing_keys}")
@@ -250,7 +344,7 @@ def main_worker(gpu, ngpus_per_node, args):
         for images, _ in train_loader:
             features = teacher_model.encoder_k(images[0].cuda())
             feature_dim = features.shape[1]
-            print(f"Feature shape: {features.shape}")
+            # print(f"Feature shape: {features.shape}")
             break
     num_classes = len(train_loader.dataset.classes)
     # # 計算類別質心
@@ -313,19 +407,18 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         info_losses.update(loss_info_value.item(), images[0].size(0))
         print("loss_info_value:",loss_info_value)
         total_loss_value = loss_info_value
-        print("total_loss_value = loss_info_value",total_loss_value)
-
+        # print("total_loss_value = loss_info_value",total_loss_value)
 
         # Knowledge Distillation 
         # soft targets
         # soft label
         # 切換為評估模式，計算質心對齊損失
         student_probs = student_key
-        print(f"student probs shape:{student_probs.shape}")
-        print(student_probs)
+        # print(f"student probs shape:{student_probs.shape}")
+        # print(student_probs)
         with torch.no_grad():
             teacher_embeddings = teacher_model.encoder_q(images[0]).cuda(args.gpu)  # Teacher 使用 query encoder
-            print(f"teacher_probs shape:{teacher_embeddings.shape}")
+            # print(f"teacher_probs shape:{teacher_embeddings.shape}")
 
         kd_loss = knowledge_distillation_loss(teacher_embeddings, student_probs, args.kd_temperature)
         print(f"kd_loss: {kd_loss}")
@@ -340,22 +433,32 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         with torch.no_grad():
             z_q = model.encoder_q(images[0]).cuda(args.gpu)  # student 明確使用 query encoder
             z_k = model.encoder_k(images[1]).cuda(args.gpu)  # student 明確使用 key encoder
+            # print(f"z_q:{z_q}\n")
+            # print(f"z_k:{z_k}\n")
+            # zero_vectors_in_z_q = (z_q.norm(dim=-1) == 0).any()
+            # zero_vectors_in_z_k = (z_k.norm(dim=-1) == 0).any()
+            # print("z_q 是否包含零向量:", zero_vectors_in_z_q)
+            # print("z_k 是否包含零向量:", zero_vectors_in_z_k)
+            # print("z_q 的形狀:", z_q.shape)
+            # print("z_k 的形狀:", z_k.shape)
 
         # cosine_similarity
         # sim_q = cosine_similarity(z_q.unsqueeze(1), class_centroids.unsqueeze(0), dim=2).cuda(args.gpu)
         # sim_k = cosine_similarity(z_k.unsqueeze(1), class_centroids.unsqueeze(0), dim=2).cuda(args.gpu)
-        sim_q = cosine_similarity_matrix(z_q, class_centroids)
-        sim_k = cosine_similarity_matrix(z_k, class_centroids)
-        print("sim_k.shape:",sim_k.shape)
-        print("sim_q.shape:",sim_q.shape)
-        print(f"centroids.shape: {class_centroids.shape}")
+        sim_q = cosine_similarity_matrix(z_q, class_centroids,eps=1e-8)
+        sim_k = cosine_similarity_matrix(z_k, class_centroids,eps=1e-8)
+        # print(f"sim_k.shape:{sim_k.shape}\n")
+        # print(f"sim_k:{sim_k}\n")
+        # print(f"sim_q.shape:{sim_q.shape}\n")
+        # print(f"sim_q:{sim_q}\n")
 
 
         # print(f"z_q device: {z_q.device}, class_centroids device: {class_centroids.device}")
-        loss_centroid_value = 1 - F.cosine_similarity(sim_q, sim_k).mean()
-        print("F.cosine_similarity(sim_q, sim_k).mean():" ,F.cosine_similarity(sim_q, sim_k).mean())
-        print("loss_centroid_value: ",loss_centroid_value)
+        loss_centroid_value = 1 - F.cosine_similarity(sim_q, sim_k,eps=1e-8).mean()
+        # print("F.cosine_similarity(sim_q, sim_k).mean():" ,F.cosine_similarity(sim_q, sim_k).mean())
+        # print("loss_centroid_value: ",loss_centroid_value)
         # print(f"Loss centroid value calculated on device: {loss_centroid_value.device}")
+        # loss_centroid_value = F.normalize(loss_centroid_value, p=2, dim=1)
         model.train()
         
         # # Update Centroid Loss
@@ -476,12 +579,16 @@ def get_class_centroids(model, loader,num_classes, feature_dim):
 def cosine_similarity_matrix(z_q, class_centroids, eps=1e-8):
     # 正規化
     # N X D
-    z_q_norm = F.normalize(z_q, p=2, dim=1)
+    z_q_norm = F.normalize(z_q, p=2, dim=1,eps=eps)
     # C X D ->D X C
-    class_centroids_norm = F.normalize(class_centroids, p=2, dim=1)
+    class_centroids_norm = F.normalize(class_centroids, p=2, dim=1,eps=eps)
+    # assert torch.all(z_q_norm.norm(dim=1) > 0), "z_q 含有零向量！"
+    # assert torch.all(class_centroids_norm.norm(dim=1) > 0), "class_centroids 含有零向量！"
     # 點積 : N X D * D X C -> N X C  
-    # 矩陣乘法計算餘弦相似度
-    return torch.matmul(z_q_norm, class_centroids_norm.t())
+    # 矩陣乘法計算餘弦相似度F.normalize(loss_centroid_value, p=2, dim=1)
+    csm = torch.matmul(z_q_norm, class_centroids_norm.t())
+    # csm = F.normalize(csm, p=2, dim=1)
+    return csm
 
 def apply_masking(features, cluster_assignments, args):
     """
@@ -579,7 +686,8 @@ def run_kmeans(features, args):
         clus.niter = 20
         clus.nredo = 5
         clus.seed = seed
-        clus.max_points_per_centroid = 200
+        clus.max_points_per_centroid =  args.num_classes
+
         clus.min_points_per_centroid = 10
 
         res = faiss.StandardGpuResources()
@@ -651,13 +759,13 @@ def knowledge_distillation_loss(teacher_probs, student_probs, temperature=1.0):
     - temperature: 蒸餾溫度，默認為 1.0。較高的溫度可以使概率分布更加平滑。
     """
     print("Berfore 概率分布")
-    print(f"teacher logits: {teacher_probs}")
-    print(f"Student logits: {student_probs}")
+    # print(f"teacher logits: {teacher_probs}")
+    # print(f"Student logits: {student_probs}")
     # 調整 Teacher 和 Student 的概率分布，加入溫度系數
     teacher_probs = F.softmax(teacher_probs / temperature, dim=1)
     student_probs = F.softmax(student_probs / temperature, dim=1)
-    print(f"Student logits min: {student_probs.min()}, max: {student_probs.max()}")
-    print(f"Teacher logits min: {teacher_probs.min()}, max: {teacher_probs.max()}")
+    # print(f"Student logits min: {student_probs.min()}, max: {student_probs.max()}")
+    # print(f"Teacher logits min: {teacher_probs.min()}, max: {teacher_probs.max()}")
     print("Calculate kl_div")
 
     # 計算 KL 散度損失 (使用 PyTorch 的 kl_div 函數)
