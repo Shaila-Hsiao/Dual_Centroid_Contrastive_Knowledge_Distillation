@@ -113,6 +113,7 @@ def main():
     elif args.dataset == "CIFAR10":
         args.num_cluster = "10,50,100"
         args.pcl_r = 1024
+        args.num_classes = 10
     elif args.dataset == "CIFAR100":
         args.num_cluster = "100,250,500"
         args.pcl_r = 4096
@@ -276,7 +277,7 @@ def main_worker(gpu, ngpus_per_node, args):
         eval_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # ---- 檢查資料是否正確載入 ---- #
+    # # ---- 檢查資料是否正確載入 ---- #
     # print("Dataset:",args.dataset)
     # print("image size:",args.size)
     # print(f"Train dataset size: {len(train_dataset)}")
