@@ -4,7 +4,7 @@ import math
 import os
 import random
 import shutil
-import time
+from datetime import datetime  
 import warnings
 from tqdm import tqdm
 import numpy as np
@@ -24,7 +24,7 @@ import pcl.builder
 
 import torch.nn.functional as F
 import wandb
-
+import time
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -87,14 +87,14 @@ parser.add_argument('--cos', action='store_true',
 parser.add_argument('--num-cluster', default='500,1000,2000', type=str, 
 #parser.add_argument('--num-cluster', default='1000,1500,2000', type=str, 
                     help='number of clusters')
-parser.add_argument('--warmup-epoch', default=10, type=int,
+parser.add_argument('--warmup-epoch', default=1, type=int,
                     help='number of warm-up epochs to only train with InfoNCE loss')
 parser.add_argument('--exp-dir', default='experiment_pcl', type=str,
                     help='experiment directory')
 
 parser.add_argument('--pretrained', default='', type=str,
                     help='path to pretrained checkpoint')
-parser.add_argument("--alpha", default=1, type=float, help="質心損失的權重")
+parser.add_argument("--alpha", default=1, type=float, help="student weight")
 
 
 # mask strategy
@@ -114,10 +114,15 @@ parser.add_argument("--size" ,default=64, help="Image size")
 parser.add_argument('--id', type=str, default='')
 parser.add_argument("--num-classes" ,default=200, type=int)
 
+# 在 parser 加入 ablation study 控制參數
+parser.add_argument('--use-kd', action='store_true', help='是否啟用 Knowledge Distillation')
+parser.add_argument('--use-centroid', action='store_true', help='是否啟用質心對齊')
+parser.add_argument('--use-masking', action='store_true', help='是否啟用 clustering masking')
+
 def main():
     args = parser.parse_args()
     # id(task)_arch_dataset_epochs
-    wandb.init(project="Baseline", config=args, name=f"Pretrained_{args.id}_{args.arch}_{args.dataset}_{args.epochs}")
+    wandb.init(project="Baseline", config=args, name=f"Pretrained_{args.id}_{args.arch}_{args.mask_mode}_Student_{args.alpha}_{args.dataset}_{args.epochs}",tags=[f"{args.id}",f"{args.dataset}","Pretrained",f"{args.mask_mode}"])
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -132,8 +137,8 @@ def main():
         args.pcl_r = 16384
         args.num_classes = 200
     elif args.dataset == "CIFAR10":
-        args.num_cluster = "10,50,100"
-        args.pcl_r = 1024
+        args.num_cluster = "10,100,300"
+        args.pcl_r = 4096
         args.num_classes = 10
     elif args.dataset == "CIFAR100":
         args.num_cluster = "100,250,500"
@@ -145,6 +150,10 @@ def main():
     wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
     args.num_cluster = args.num_cluster.split(',')
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    args.exp_dir = os.path.join(args.exp_dir, timestamp)  # 將 exp_dir 指向子資料夾
+
     if not os.path.exists(args.exp_dir):
         os.mkdir(args.exp_dir)
 
@@ -315,6 +324,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # 加載預訓練的老師模型權重
     # checkpoint_path = r"D:\Document\Project\contrastivelearnig\Instance_wise\moco\checkpoints\checkpoint_0199.pth.tar"
     checkpoint_path = args.pretrained
+    print("checkpoint_path:",checkpoint_path)
     # checkpoint_path = r"C:\Users\k3866\Documents\PretrianedModel\Moco\checkpoint_0099.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location="cpu",weights_only=True)
     state_dict = checkpoint["state_dict"]
@@ -330,9 +340,9 @@ def main_worker(gpu, ngpus_per_node, args):
         elif k.startswith("encoder_k."):
             new_state_dict[f"encoder_k.{k[len('encoder_k.'):]}"] = state_dict[k]
     # Print all keys in the state_dict
-    print("Keys in the  new state_dict:")
-    for key in new_state_dict.keys():
-        print(key)
+    # print("Keys in the  new state_dict:")
+    # for key in new_state_dict.keys():
+    #     print(key)
     # 加載權重到老師模型
     msg = teacher_model.load_state_dict(new_state_dict, strict=False)
     print(f"Missing keys: {msg.missing_keys}")
@@ -350,7 +360,7 @@ def main_worker(gpu, ngpus_per_node, args):
     # # 計算類別質心
     class_centroids = get_class_centroids(teacher_model, train_loader, num_classes, feature_dim)
     class_centroids = class_centroids.cuda(gpu)
-    # print(f"class_centroids device: {class_centroids.device}")
+    print(f"class_centroids device: {class_centroids}")
 
     for epoch in range(args.start_epoch, args.epochs):
         cluster_result = None
@@ -369,7 +379,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
-            }, is_best=False, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
+            }, is_best=True, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
 
 def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, cluster_result,class_centroids):
 # def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, cluster_result):
@@ -407,63 +417,6 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         info_losses.update(loss_info_value.item(), images[0].size(0))
         print("loss_info_value:",loss_info_value)
         total_loss_value = loss_info_value
-        # print("total_loss_value = loss_info_value",total_loss_value)
-
-        # Knowledge Distillation 
-        # soft targets
-        # soft label
-        # 切換為評估模式，計算質心對齊損失
-        student_probs = student_key
-        # print(f"student probs shape:{student_probs.shape}")
-        # print(student_probs)
-        with torch.no_grad():
-            teacher_embeddings = teacher_model.encoder_q(images[0]).cuda(args.gpu)  # Teacher 使用 query encoder
-            # print(f"teacher_probs shape:{teacher_embeddings.shape}")
-
-        kd_loss = knowledge_distillation_loss(teacher_embeddings, student_probs, args.kd_temperature)
-        print(f"kd_loss: {kd_loss}")
-        kd_losses.update(kd_loss.item(),images[0].size(args.gpu))
-        
-        total_loss_value += kd_loss
-
-
-        model.eval()
-        # # 切換為評估模式，計算質心對齊損失
-        # model.eval()
-        with torch.no_grad():
-            z_q = model.encoder_q(images[0]).cuda(args.gpu)  # student 明確使用 query encoder
-            z_k = model.encoder_k(images[1]).cuda(args.gpu)  # student 明確使用 key encoder
-            # print(f"z_q:{z_q}\n")
-            # print(f"z_k:{z_k}\n")
-            # zero_vectors_in_z_q = (z_q.norm(dim=-1) == 0).any()
-            # zero_vectors_in_z_k = (z_k.norm(dim=-1) == 0).any()
-            # print("z_q 是否包含零向量:", zero_vectors_in_z_q)
-            # print("z_k 是否包含零向量:", zero_vectors_in_z_k)
-            # print("z_q 的形狀:", z_q.shape)
-            # print("z_k 的形狀:", z_k.shape)
-
-        # cosine_similarity
-        # sim_q = cosine_similarity(z_q.unsqueeze(1), class_centroids.unsqueeze(0), dim=2).cuda(args.gpu)
-        # sim_k = cosine_similarity(z_k.unsqueeze(1), class_centroids.unsqueeze(0), dim=2).cuda(args.gpu)
-        sim_q = cosine_similarity_matrix(z_q, class_centroids,eps=1e-8)
-        sim_k = cosine_similarity_matrix(z_k, class_centroids,eps=1e-8)
-        # print(f"sim_k.shape:{sim_k.shape}\n")
-        # print(f"sim_k:{sim_k}\n")
-        # print(f"sim_q.shape:{sim_q.shape}\n")
-        # print(f"sim_q:{sim_q}\n")
-
-
-        # print(f"z_q device: {z_q.device}, class_centroids device: {class_centroids.device}")
-        loss_centroid_value = 1 - F.cosine_similarity(sim_q, sim_k,eps=1e-8).mean()
-        # print("F.cosine_similarity(sim_q, sim_k).mean():" ,F.cosine_similarity(sim_q, sim_k).mean())
-        # print("loss_centroid_value: ",loss_centroid_value)
-        # print(f"Loss centroid value calculated on device: {loss_centroid_value.device}")
-        # loss_centroid_value = F.normalize(loss_centroid_value, p=2, dim=1)
-        model.train()
-        
-        # # Update Centroid Loss
-        total_loss_value += args.alpha * loss_centroid_value
-        centroid_losses.update(loss_centroid_value.item(), images[0].size(0))
 
         if output_proto is not None:
             loss_proto_value = 0
@@ -479,6 +432,54 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
                 total_loss_value += loss_proto_value
                 proto_losses.update(loss_proto_value.item(), images[0].size(0))
 
+        # Knowledge Distillation 
+        if args.use_kd:
+            student_probs = student_key
+         # 3. Knowledge Distillation（若啟用）
+            with torch.no_grad():
+                teacher_embeddings = teacher_model.encoder_q(images[0]).cuda(args.gpu)  # Teacher 使用 query encoder
+            # print(f"teacher_probs shape:{teacher_embeddings.shape}")
+
+            kd_loss = knowledge_distillation_loss(teacher_embeddings, student_probs, args.kd_temperature)
+            print(f"kd_loss: {kd_loss}")
+            kd_losses.update(kd_loss.item(),images[0].size(args.gpu))
+        else:
+            kd_loss = 0
+    
+        if args.use_centroid:
+            model.eval()
+            # # 切換為評估模式，計算質心對齊損失
+            with torch.no_grad():
+                z_q = model.encoder_q(images[0]).cuda(args.gpu)  # student 明確使用 query encoder
+                z_k = model.encoder_k(images[1]).cuda(args.gpu)  # student 明確使用 key encoder
+                # print(f"z_q:{z_q}\n")
+                # print(f"z_k:{z_k}\n")
+                # print("z_q 的形狀:", z_q.shape)
+                # print("z_k 的形狀:", z_k.shape)
+
+            # cosine_similarity
+            sim_q = cosine_similarity_matrix(z_q, class_centroids,eps=1e-8)
+            sim_k = cosine_similarity_matrix(z_k, class_centroids,eps=1e-8)
+            # print(f"sim_k.shape:{sim_k.shape}\n")
+            # print(f"sim_k:{sim_k}\n")
+            # print(f"sim_q.shape:{sim_q.shape}\n")
+            # print(f"sim_q:{sim_q}\n")
+
+
+            # print(f"z_q device: {z_q.device}, class_centroids device: {class_centroids.device}")
+            loss_centroid_value = 1 - F.cosine_similarity(sim_q, sim_k,eps=1e-8).mean()
+            # print("F.cosine_similarity(sim_q, sim_k).mean():" ,F.cosine_similarity(sim_q, sim_k,eps=1e-8).mean())
+            # print(f"Loss centroid value calculated on device: {loss_centroid_value.device}")
+            model.train()
+
+            # Update Centroid Loss
+            print("loss_centroid_value: ",loss_centroid_value)
+            centroid_losses.update(loss_centroid_value.item(), images[0].size(0))
+
+        else:
+            loss_centroid_value = 0
+          
+        total_loss_value = total_loss_value + args.alpha * kd_loss + (1-args.alpha)*loss_centroid_value
         print("total_loss_value:",total_loss_value)
         total_losses.update(total_loss_value.item(), images[0].size(0))
         acc = accuracy(output, target)[0]
@@ -505,59 +506,7 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         "accuracy_proto": acc_proto.avg,
     })
 
-
-# def set_centroids(teacher_model, train_loader, num_classes, feature_dim):
-#     print('Computing Centroid via SSLCon model...')
-#     centroids = torch.zeros(num_classes, feature_dim).cuda()
-#     counts = torch.zeros(num_classes).cuda()
-#     with torch.no_grad():
-#         progress_bar = tqdm(train_loader, desc="Computing Centroids")
-#         for idx, (images, labels) in enumerate(progress_bar):
-#             progress_bar.set_description(f"[{idx + 1}/{len(train_loader)}]")
-#             image = images[0].cuda()
-#             labels = labels.cuda()
-#             features = teacher_model.encoder_k(image)
-#             for i in range(num_classes):
-#                 mask = labels == i
-#                 centroids[i] += features[mask].sum(dim=0)
-#                 counts[i] += mask.sum()
-#     centroids /= counts.unsqueeze(1)
-#     centroids = F.normalize(centroids, dim=-1)
-#     return centroids, counts
-
 def get_class_centroids(model, loader,num_classes, feature_dim):
-    # print("計算類別質心...")
-    # centroids = {}
-    # count = {}
-    
-    # model.eval()
-    # with torch.no_grad():
-    #     for images, target in tqdm(loader):
-            
-    #         # 明確將資料搬移到 GPU，並轉換為 CUDA Tensor
-    #         # images = images.cuda(device, non_blocking=True)
-    #         images = [img.cuda(device, non_blocking=True) for img in images]
-    #         # 使用 key encoder 提取特徵
-    #         features = model.encoder_k(images[0]).to(device)
-            
-    #         for feature, label in zip(features, target):
-    #             label = label.item()
-    #             if label not in centroids:
-    #                 centroids[label] = feature.cpu()
-    #                 count[label] = 1
-    #             else:
-    #                 centroids[label] += feature.cpu()
-    #                 count[label] += 1
-
-    # # 計算每個類別的平均值
-    # for label in centroids:
-    #     centroids[label] /= count[label]
-    # class_centroids = torch.stack([centroids[key] for key in sorted(centroids.keys())]).to(device)
-    # # 在此插入檢查代碼
-    # # print(f"[DEBUG] Teacher model output feature dimension: {features.shape[-1]}")
-    # # print(f"Features device: {features.device}")
-    # # print(f"Class centroids device: {class_centroids.device}")
-    # return class_centroids
     print('Computing Centroid ...')
     centroids = torch.zeros(num_classes, feature_dim).cuda()
     counts = torch.zeros(num_classes).cuda()
@@ -638,6 +587,7 @@ def apply_masking(features, cluster_assignments, args):
         elif args.mask_mode == 'mask_proportion':
             # 遮罩指定比例的最遠樣本
             num_to_mask = int(len(indices) * args.proportion)
+            print("num_to_mask",num_to_mask)
             sorted_indices = sorted(zip(indices, distances), key=lambda x: x[1], reverse=True)
             max_dis_list.extend([x[0] for x in sorted_indices[:num_to_mask]])
             # print(f"Cluster {cluster_id}: Masking {num_to_mask} farthest samples.")
@@ -686,7 +636,8 @@ def run_kmeans(features, args):
         clus.niter = 20
         clus.nredo = 5
         clus.seed = seed
-        clus.max_points_per_centroid =  args.num_classes
+        clus.max_points_per_centroid =  1000
+        # clus.max_points_per_centroid =  args.num_classes
 
         clus.min_points_per_centroid = 10
 
@@ -698,7 +649,7 @@ def run_kmeans(features, args):
 
         # 執行聚類
         clus.train(masked_features.cpu().numpy(), index)
-
+    
         # 搜索最近的聚類中心
         D, I = index.search(masked_features.cpu().numpy(), 1)
         im2cluster = [int(n[0]) for n in I]
@@ -720,7 +671,10 @@ def run_kmeans(features, args):
                 density[i] = dmax
 
         density = density.clip(np.percentile(density, 10), np.percentile(density, 90))
-        density = args.temperature * density / density.mean()
+        density_mean = density.mean()
+        density = args.temperature * density / (density_mean + 1e-6)
+        # density = args.temperature * density / density.mean()
+        
 
         # 添加遮罩檢查之前
         print(f"Cluster assignments (first 10): {im2cluster[:10]}")  # 確認分群結果
