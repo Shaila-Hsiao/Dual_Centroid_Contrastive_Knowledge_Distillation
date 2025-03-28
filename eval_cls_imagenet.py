@@ -5,7 +5,7 @@ import random
 import shutil
 import time
 import warnings
-
+from datetime import datetime  
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -21,6 +21,9 @@ import torchvision.models as models
 # import tensorboard_logger as tb_logger
 import wandb
 from tqdm import tqdm
+from sklearn.metrics import classification_report, confusion_matrix, precision_score, recall_score, f1_score
+
+
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
     and callable(models.__dict__[name]))
@@ -90,7 +93,7 @@ parser.add_argument('--exp-dir', default='experiment_pcl', type=str,
 
 def main():
     args = parser.parse_args()
-    wandb.init(project="Baseline",config=args,name=f"Cls_{args.id}_{args.arch}_{args.dataset}_{args.epochs}")
+    wandb.init(project="Baseline",config=args,name=f"Cls_{args.id}_{args.arch}_{args.dataset}_{args.epochs}",tags=[f"{args.id}",f"{args.dataset}","Classification","mask_proportation"])
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -100,7 +103,10 @@ def main():
                       'which can slow down your training considerably! '
                       'You may see unexpected behavior when restarting '
                       'from checkpoints.')
-    
+        
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    args.exp_dir = os.path.join(args.exp_dir, timestamp)  # 將 exp_dir 指向子資料夾
+
     if not os.path.exists(args.exp_dir):
         os.mkdir(args.exp_dir)
 
@@ -391,7 +397,7 @@ def main_worker(gpu, ngpus_per_node, args):
         train_loss,train_acc1,train_acc5 = train(train_loader, model, criterion, optimizer, epoch, args)
 
         # evaluate on validation set
-        eval_loss,eval_acc1,eval_acc5 = validate(val_loader, model, criterion, args, epoch)
+        eval_loss,eval_acc1,eval_acc5,precision, recall, f1 = validate(val_loader, model, criterion, args, epoch)
         wandb.log({
             "epoch":epoch,
             "training_loss":train_loss,
@@ -400,7 +406,10 @@ def main_worker(gpu, ngpus_per_node, args):
             "validate_loss":eval_loss,
             "validate_acc1":eval_acc1,
             "validate_acc5":eval_acc5,
-        })
+            "validate_precision": precision,
+            "validate_recall": recall,
+            "validate_f1": f1,
+        },step=epoch)
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             save_checkpoint({
@@ -463,7 +472,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
 
         if i % args.print_freq == 0:
             progress.display(i)
-    return losses.avg,top1.avg,top5.avg
+    
+    # return losses.avg,top1.avg,top5.avg
+    return losses.avg, top1.avg, top5.avg
+
 
 def validate(val_loader, model, criterion, args,  epoch):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -479,6 +491,8 @@ def validate(val_loader, model, criterion, args,  epoch):
     model.eval()
 
     with torch.no_grad():
+        all_preds = []
+        all_targets = []
         end = time.time()
         for i, (images, target) in enumerate(epoch_iterator):
             if args.gpu is not None:
@@ -488,6 +502,10 @@ def validate(val_loader, model, criterion, args,  epoch):
             # compute output
             output = model(images)
             loss = criterion(output, target)
+
+            _, preds = torch.max(output, 1)
+            all_preds.extend(preds.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
 
             # measure accuracy and record loss
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -508,7 +526,13 @@ def validate(val_loader, model, criterion, args,  epoch):
     # if args.gpu==0:    
     #     logger.log_value('test_acc', top1.avg, epoch)
     #     logger.log_value('test_acc5', top5.avg, epoch)
-    return losses.avg,top1.avg,top5.avg
+    precision = precision_score(all_targets, all_preds, average='macro')  # or 'weighted'
+    recall = recall_score(all_targets, all_preds, average='macro')
+    f1 = f1_score(all_targets, all_preds, average='macro')
+    print(f' * Precision: {precision:.4f} | Recall: {recall:.4f} | F1-score: {f1:.4f}')
+    
+    return losses.avg, top1.avg, top5.avg, precision, recall, f1
+
 
 
 # def save_checkpoint(state, filename='checkpoint.pth.tar'):
