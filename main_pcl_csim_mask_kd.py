@@ -122,7 +122,10 @@ parser.add_argument('--use-masking', action='store_true', help='是否啟用 clu
 def main():
     args = parser.parse_args()
     # id(task)_arch_dataset_epochs
-    wandb.init(project="Baseline", config=args, name=f"Pretrained_{args.id}_{args.arch}_{args.mask_mode}_Student_{args.alpha}_{args.dataset}_{args.epochs}",tags=[f"{args.id}",f"{args.dataset}","Pretrained",f"{args.mask_mode}"])
+    wandb.init(project="Baseline", 
+               config=args, 
+               name=f"Pretrained_{args.id}_{args.arch}_{args.batch_size}_{args.mask_mode}_Student_{args.alpha}_{args.dataset}_{args.epochs}"
+               ,tags=[f"{args.id}",f"{args.dataset}","Pretrained",f"{args.mask_mode}"])
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -150,12 +153,12 @@ def main():
     wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
     args.num_cluster = args.num_cluster.split(',')
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    timestamp = datetime.now().strftime("%Y%m%d")
     args.exp_dir = os.path.join(args.exp_dir, timestamp)  # 將 exp_dir 指向子資料夾
 
     if not os.path.exists(args.exp_dir):
-        os.mkdir(args.exp_dir)
+        os.makedirs(args.exp_dir)
 
     ngpus_per_node = torch.cuda.device_count()
     main_worker(args.gpu, ngpus_per_node, args)
@@ -205,6 +208,16 @@ def main_worker(gpu, ngpus_per_node, args):
             print("=> no checkpoint found at '{}'".format(args.resume))
 
     cudnn.benchmark = True
+
+    # Determine loss weights
+    if args.use_kd and args.use_centroid:
+        args.alpha = args.alpha  # 手動設定比例
+    elif args.use_kd and not args.use_centroid:
+        args.alpha = 1.0  # 全部權重給 KD
+    elif not args.use_kd and args.use_centroid:
+        args.alpha = 0.0  # 全部權重給 Centroid
+    else:
+        args.alpha = 0.0  # baseline
 
 
     # ---- 加入 dataset 設定邏輯 ---- #
@@ -331,6 +344,9 @@ def main_worker(gpu, ngpus_per_node, args):
     # Print all keys in the state_dict
     print("Keys in the state_dict:")
     for key in state_dict.keys():
+
+
+        
         print(key)
     # 處理權重名稱
     new_state_dict = {}
@@ -374,7 +390,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # train(train_loader, model,teacher_model, criterion, optimizer, epoch, args, cluster_result)
 
         if (epoch + 1) % 5 == 0:
-            save_checkpoint({
+            save_checkpoint(args,{
                 'epoch': epoch + 1,
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
@@ -438,14 +454,16 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
          # 3. Knowledge Distillation（若啟用）
             with torch.no_grad():
                 teacher_embeddings = teacher_model.encoder_q(images[0]).cuda(args.gpu)  # Teacher 使用 query encoder
+
             # print(f"teacher_probs shape:{teacher_embeddings.shape}")
 
             kd_loss = knowledge_distillation_loss(teacher_embeddings, student_probs, args.kd_temperature)
             print(f"kd_loss: {kd_loss}")
             kd_losses.update(kd_loss.item(),images[0].size(args.gpu))
         else:
+            # w/o KD 
             kd_loss = 0
-    
+            print("w/o KD ")
         if args.use_centroid:
             model.eval()
             # # 切換為評估模式，計算質心對齊損失
@@ -477,8 +495,9 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
             centroid_losses.update(loss_centroid_value.item(), images[0].size(0))
 
         else:
+            # w/o CFA
             loss_centroid_value = 0
-          
+            print("w/o CFA")
         total_loss_value = total_loss_value + args.alpha * kd_loss + (1-args.alpha)*loss_centroid_value
         print("total_loss_value:",total_loss_value)
         total_losses.update(total_loss_value.item(), images[0].size(0))
@@ -732,11 +751,11 @@ def knowledge_distillation_loss(teacher_probs, student_probs, temperature=1.0):
     # 返回損失值，考慮溫度對梯度的影響
     return loss * (temperature ** 2)
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(args,state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')
-
+        best_model_path = os.path.join(args.exp_dir, 'model_best.pth.tar')
+        shutil.copyfile(filename, best_model_path)
 class AverageMeter(object):
     def __init__(self, name, fmt=':f'):
         self.name = name
