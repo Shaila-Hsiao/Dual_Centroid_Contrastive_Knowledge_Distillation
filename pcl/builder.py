@@ -123,6 +123,7 @@ class MoCo(nn.Module):
         # compute query features
         q = self.encoder_q(im_q)  # queries: NxC
         q = nn.functional.normalize(q, dim=1)
+        student_key = q
         # compute logits
         # Einstein sum is more intuitive
         # positive logits: Nx1
@@ -157,18 +158,19 @@ class MoCo(nn.Module):
                 neg_proto_id = set(all_proto_id)-set(pos_proto_id.tolist())
                 # print(f"neg_proto_id ({len(neg_proto_id)}): \n{neg_proto_id}")    
 
-                # 在负样本采样中可以调整
-                r = min(len(neg_proto_id), self.r)  # 确保采样数不超过可用负样本数
-                neg_proto_id = sample(list(neg_proto_id), r)
-                # 檢查 neg_proto_id 的大小是否足夠
+                # Adjust the number of samples for negative prototypes
+                r = min(len(neg_proto_id), self.r)  # Ensure the number of samples does not exceed available negative samples
+                print("Adjust the number of samples for negative prototypes",r)
+                neg_proto_id = sample(neg_proto_id, r)
+                # Check if the size of neg_proto_id is sufficient
                 # if len(neg_proto_id) < self.r:
                 #     print(f"Warning: neg_proto_id size ({len(neg_proto_id)}) is smaller than self.r ({self.r}). Using all available negative prototypes.")
-                #     neg_proto_id = neg_proto_id  # 使用所有負樣本
+                #     neg_proto_id = neg_proto_id  # Use all negative samples
                 # else:
-                #     neg_proto_id = sample(neg_proto_id, self.r)  # 隨機選取 r 個樣本
-                # neg_proto_id = sample(neg_proto_id,self.r) #sample r negative prototypes 
+                #     neg_proto_id = sample(neg_proto_id, self.r)  # Randomly select r samples
+                # neg_proto_id = sample(neg_proto_id, self.r)  # Randomly sample r negative prototypes
                 # print(f"Sampled neg_proto_id ({len(neg_proto_id)}): \n{neg_proto_id}")
-                neg_prototypes = prototypes[neg_proto_id]    
+                neg_prototypes = prototypes[neg_proto_id]       
 
                 proto_selected = torch.cat([pos_prototypes,neg_prototypes],dim=0)
                 # print(f"proto_selected shape: {proto_selected.shape}")
@@ -185,9 +187,11 @@ class MoCo(nn.Module):
                 
                 proto_labels.append(labels_proto)
                 proto_logits.append(logits_proto)
-            return logits, labels,proto_logits, proto_labels
+            # return logits, labels,proto_logits, proto_labels
+            return logits, labels,student_key,proto_logits, proto_labels
         else:
-            return logits, labels,None, None
+            # return logits, labels,None, None
+            return logits, labels,student_key,None, None
 
 
 # utils
