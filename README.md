@@ -7,6 +7,16 @@
 * PyTorch ≥ 2.5
 * <a href="https://anaconda.org/conda-forge/faiss-gpu">faiss-gpu</a>: conda install conda-forge::faiss-gpu
 * pip install tqdm
+### Tiny-ImageNet
+- change the root in `tiny.py`
+  <pre>
+    tiny_imagenet_root = [Tiny-ImageNet folder]
+  </pre>
+- Reorganizing the Tiny-ImageNet Validation Set, use the provided script:
+  <pre>
+    python tiny.py
+  </pre>
+
 
 ### Pre-Train: 
 <pre>python main_dcbcl_resnet.py \ 
