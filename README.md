@@ -17,8 +17,8 @@
   --mlp --aug-plus --cos (only activated for PCL v2)\
   --proportion 0.2 \
   --alpha 0.2 \
-  --dataset CIFAR10 \
-  --exp-dir []\
+  --dataset TinyImageNet \
+  --exp-dir [your training output directory]\
   --pretrained [path to pretrained teacher checkpoint]\
   --student-ratio 20% \
   --use-kd \
