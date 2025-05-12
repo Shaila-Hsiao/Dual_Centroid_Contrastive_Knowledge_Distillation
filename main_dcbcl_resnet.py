@@ -22,7 +22,7 @@ import torchvision.models as models
 import pcl.loader
 import pcl.builder
 # 1. Import student model
-from resnet import StudentResNet50,student_resnet50
+from resnet import student_resnet50
 
 
 import torch.nn.functional as F
