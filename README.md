@@ -29,7 +29,7 @@
 
 ### Download Pre-trained Teacher Models
 <a href="https://drive.google.com/file/d/1JZ5YX6AUukPm8hB2RWMCgW0MUABG6650/view?usp=drive_link">MoCo</a>| 
------- | ------
+
 
 ### Linear Evaluation 
 <pre>python eval_cls_imagenet_ratio.py --pretrained [your pretrained model] \
