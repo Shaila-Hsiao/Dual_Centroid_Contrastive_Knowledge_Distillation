@@ -8,9 +8,9 @@
 * <a href="https://anaconda.org/conda-forge/faiss-gpu">faiss-gpu</a>: conda install conda-forge::faiss-gpu
 * pip install tqdm
 ### Tiny-ImageNet
-- change the root in `tiny.py`
+- change the [Tiny-Imagenet dataset folder] in `tiny.py`
   ```shell=
-    tiny_imagenet_root = [Tiny-ImageNet folder]
+    tiny_imagenet_root = [Tiny-Imagenet dataset folder]
   ```
 - Reorganizing the Tiny-ImageNet Validation Set, use the provided script:
   ```shell=
