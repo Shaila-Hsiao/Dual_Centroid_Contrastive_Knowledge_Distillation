@@ -193,6 +193,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     print("=> creating student model (custom StudentResNet50)")
     student_block_configs = {
+        '100%': [3, 6, 4, 3],
         '80%': [3, 4, 4, 2],
         '60%': [3, 3, 3, 1],
         '40%': [2, 2, 2, 0],
@@ -207,7 +208,7 @@ def main_worker(gpu, ngpus_per_node, args):
         args.low_dim, args.pcl_r, args.moco_m, args.temperature, args.mlp)
     model = model.cuda(gpu)
     print(model)
-    # 在此插入檢查代碼
+    # check model on device
     print(f"Teacher model device: {next(teacher_model.parameters()).device}")
     print(f"Student model device: {next(model.parameters()).device}")
     criterion = nn.CrossEntropyLoss().cuda(gpu)
@@ -515,9 +516,11 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
             centroid_losses.update(loss_centroid_value.item(), images[0].size(0))
 
         else:
-            # w/o CFA
+            # w/o Centroid Feature Alignment
             loss_centroid_value = 0
             print("w/o CFA")
+        
+        # total loss = L_DCBCL + alpha∙L_KD + (1-alpha)∙L_CFA
         total_loss_value = total_loss_value + args.alpha * kd_loss + (1-args.alpha)*loss_centroid_value
         print("total_loss_value:",total_loss_value)
         total_losses.update(total_loss_value.item(), images[0].size(0))
@@ -545,6 +548,7 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
     #     "accuracy_proto": acc_proto.avg,
     # })
 
+# compute class centroid
 def get_class_centroids(model, loader,num_classes, feature_dim):
     print('Computing Centroid ...')
     centroids = torch.zeros(num_classes, feature_dim).cuda()
@@ -578,6 +582,7 @@ def cosine_similarity_matrix(z_q, class_centroids, eps=1e-8):
     # csm = F.normalize(csm, p=2, dim=1)
     return csm
 
+# Apply Outlier Elimination Strategy
 def apply_masking(features, cluster_assignments, args):
     """
     根據 clustering assignments 和遮罩策略對特徵數據應用遮罩。
@@ -630,6 +635,7 @@ def apply_masking(features, cluster_assignments, args):
             sorted_indices = sorted(zip(indices, distances), key=lambda x: x[1], reverse=True)
             max_dis_list.extend([x[0] for x in sorted_indices[:num_to_mask]])
             # print(f"Cluster {cluster_id}: Masking {num_to_mask} farthest samples.")
+    
     # 將被遮罩的樣本設為零向量
     masked_features = features.copy()
     print(f"Total masked samples: {len(max_dis_list)}")
@@ -641,6 +647,7 @@ def apply_masking(features, cluster_assignments, args):
     # print("Max features: ",masked_features.shape)
     return masked_features
 
+# compute images feature 
 def compute_features(eval_loader, model, args):
     print('Computing features...')
     model.eval()
@@ -651,6 +658,7 @@ def compute_features(eval_loader, model, args):
             feat = model(images, is_eval=True)
             features[index] = feat
     return features.cpu()
+
 
 def run_kmeans(features, args):
     """
@@ -743,7 +751,7 @@ def run_kmeans(features, args):
         results['im2cluster'].append(im2cluster)
 
     return results
-
+# compute knowledge distillation loss 
 def knowledge_distillation_loss(teacher_probs, student_probs, temperature=1.0):
     """
     計算 KD (Knowledge Distillation) 損失
