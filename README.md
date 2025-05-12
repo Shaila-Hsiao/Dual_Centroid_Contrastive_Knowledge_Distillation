@@ -28,7 +28,8 @@
 </pre>
 
 ### Download Pre-trained Teacher Models
-<a href="https://drive.google.com/file/d/1JZ5YX6AUukPm8hB2RWMCgW0MUABG6650/view?usp=drive_link">MoCo</a>| 
+Use MoCo as Pre-trained Teacher:
+<a href="https://drive.google.com/file/d/1JZ5YX6AUukPm8hB2RWMCgW0MUABG6650/view?usp=drive_link">Tiny-ImageNet</a>
 
 
 ### Linear Evaluation 
