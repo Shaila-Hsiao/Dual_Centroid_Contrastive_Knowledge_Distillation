@@ -9,17 +9,18 @@
 * pip install tqdm
 ### Tiny-ImageNet
 - change the root in `tiny.py`
-  <pre>
+  ```shell=
     tiny_imagenet_root = [Tiny-ImageNet folder]
-  </pre>
+  ```
 - Reorganizing the Tiny-ImageNet Validation Set, use the provided script:
-  <pre>
+  ```shell=
     python tiny.py
-  </pre>
+  ```
 
 
 ### Pre-Train: 
-<pre>python main_dcbcl_resnet.py \ 
+```shell=
+python main_dcbcl_resnet.py \ 
   -a resnet50 \ 
   --lr 0.05 \
   --batch-size 256 \
@@ -35,7 +36,7 @@
   --use-centroid \
   --use-masking \
   [Tiny-Imagenet dataset folder]
-</pre>
+```
 
 ### Download Pre-trained Teacher Models
 Use MoCo as Pre-trained Teacher:
@@ -43,7 +44,8 @@ Use MoCo as Pre-trained Teacher:
 
 
 ### Linear Evaluation 
-<pre>python eval_cls_imagenet_ratio.py --pretrained [your pretrained model] \
+```shell=
+python eval_cls_imagenet_ratio.py --pretrained [your pretrained model] \
   -a resnet50 \
   --lr 0.01 \
   --batch-size 256 \
@@ -52,5 +54,5 @@ Use MoCo as Pre-trained Teacher:
   --dataset TinyImageNet \
   --exp-dir [your evaluation output directory] \
   [Tiny-ImageNet dataset folder]
-</pre>
+```
 
