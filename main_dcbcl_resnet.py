@@ -356,18 +356,14 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
     # 加載預訓練的老師模型權重
-    # checkpoint_path = r"D:\Document\Project\contrastivelearnig\Instance_wise\moco\checkpoints\checkpoint_0199.pth.tar"
+    
     checkpoint_path = args.pretrained
     print("checkpoint_path:",checkpoint_path)
-    # checkpoint_path = r"C:\Users\k3866\Documents\PretrianedModel\Moco\checkpoint_0099.pth.tar"
     checkpoint = torch.load(checkpoint_path, map_location="cpu",weights_only=True)
     state_dict = checkpoint["state_dict"]
     # Print all keys in the state_dict
     print("Keys in the state_dict:")
-    for key in state_dict.keys():
-
-
-        
+    for key in state_dict.keys():  
         print(key)
     # 處理權重名稱
     new_state_dict = {}
@@ -386,7 +382,8 @@ def main_worker(gpu, ngpus_per_node, args):
     print(f"Unexpected keys: {msg.unexpected_keys}")
     teacher_model = teacher_model.cuda(gpu)
     teacher_model.eval()
-     # 計算特徵維度
+    
+    # 計算特徵維度
     with torch.no_grad():
         for images, _ in train_loader:
             features = teacher_model.encoder_k(images[0].cuda())
@@ -485,6 +482,8 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
             # w/o KD 
             kd_loss = 0
             print("w/o KD ")
+        
+        # CFA 
         if args.use_centroid:
             model.eval()
             # # 切換為評估模式，計算質心對齊損失
