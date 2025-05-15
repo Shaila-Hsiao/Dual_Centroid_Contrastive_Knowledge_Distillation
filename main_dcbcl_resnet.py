@@ -159,7 +159,7 @@ def main():
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
+    #wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
     args.num_cluster = args.num_cluster.split(',')
 
