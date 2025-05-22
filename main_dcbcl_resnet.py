@@ -396,6 +396,9 @@ def main_worker(gpu, ngpus_per_node, args):
     class_centroids = class_centroids.cuda(gpu)
     print(f"class_centroids device: {class_centroids}")
 
+    best_loss = float('inf')  # 初始化為無限大
+
+
     for epoch in range(args.start_epoch, args.epochs):
         cluster_result = None
         if epoch >= args.warmup_epoch:
@@ -404,16 +407,19 @@ def main_worker(gpu, ngpus_per_node, args):
             cluster_result = run_kmeans(features, args)
 
         adjust_learning_rate(optimizer, epoch, args)
-        train(train_loader, model,teacher_model, criterion, optimizer, epoch, args, cluster_result,class_centroids)
+        train_loss = train(train_loader, model,teacher_model, criterion, optimizer, epoch, args, cluster_result,class_centroids)
         # train(train_loader, model,teacher_model, criterion, optimizer, epoch, args, cluster_result)
-
+        is_best = train_loss < best_loss
+        if is_best:
+            best_loss = train_loss
+            print(f"New best model found at epoch {epoch} with loss {train_loss:.4f}")
         # if (epoch + 1) % 5 == 0:
         save_checkpoint(args,{
             'epoch': epoch + 1,
             'arch': args.arch,
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
-        }, is_best=True, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
+        }, is_best=is_best, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
 
 def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, cluster_result,class_centroids):
 # def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, cluster_result):
@@ -546,6 +552,7 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
     #     "accuracy_inst": acc_inst.avg,
     #     "accuracy_proto": acc_proto.avg,
     # })
+    return total_losses.avg  # 加在 train() 函數最後一行
 
 # compute class centroid
 def get_class_centroids(model, loader,num_classes, feature_dim):
