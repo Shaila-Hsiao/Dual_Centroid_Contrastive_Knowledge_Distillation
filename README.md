@@ -84,6 +84,7 @@ python eval_cls_imagenet_ratio.py \
   --lr 0.01 \
   --batch-size 256 \
   --epochs 200 \
+  --patience 20 \
   --student-ratio 20% \
   --dataset TinyImageNet \
   --exp-dir [your_eval_output_dir] \
