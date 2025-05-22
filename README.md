@@ -1,8 +1,3 @@
-明白了，這是你可以 **直接貼到 `README.md` 中使用的 Markdown 版本**，格式與語法完全正確 ✅：
-
----
-
-````markdown
 ## 📘 Dynamic Cluster-Based Contrastive Learning with Knowledge Distillation
 
 <img src="./img/DCBCL_framework.png" width="600">
