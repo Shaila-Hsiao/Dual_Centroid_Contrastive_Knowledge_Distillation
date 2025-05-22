@@ -196,8 +196,8 @@ def main_worker(gpu, ngpus_per_node, args):
         '100%': [3, 6, 4, 3],
         '80%': [3, 4, 4, 2],
         '60%': [3, 3, 3, 1],
-        '40%': [2, 2, 2, 0],
-        '20%': [1, 1, 1, 0],
+        '40%': [2, 2, 2, 1],
+        '20%': [1, 1, 1, 1],
     }
     # student_backbone = StudentResNet50(block_counts=student_block_counts).cuda(gpu)
     student_block_counts = student_block_configs[args.student_ratio]
