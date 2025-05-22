@@ -6,7 +6,7 @@ import subprocess
 # mask_proportion  
 # mask_threshold 1~6
 cmd1 = [
-    "python", "main_pcl_csim_mask_kd.py", 
+    "python", "main_dcbcl_resnet.py", 
     "-a", "resnet50",
     "--lr", "0.03",
     "--batch-size", "256",
@@ -14,8 +14,8 @@ cmd1 = [
     "--aug-plus", "--cos","--mlp",  # PCL v2 激活參數
     "--gpu", "0", 
     "--workers", "12",
-    "--warmup-epoch","20",
-    "--epochs", "200",
+    "--warmup-epoch","2",
+    "--epochs", "4",
     "--mask_mode","mask_proportion",
     # "--mask_mode","mask_threshold",
     # "--dist_threshold","0.1",
@@ -23,27 +23,28 @@ cmd1 = [
     "--alpha","0.2",
     "--id", "PCMK",
     "--dataset","TinyImageNet",
-    "--exp-dir",r"save\pcl_csim_mask_kd\tinyimagenet\train",
+    "--exp-dir",r"save\dcbcl\tinyimagenet\train",
     "--pretrained",r"D:\Document\Project\PretrainedModel\MoCo\save\tinyimagenet\checkpoint_last.pth.tar",
     r"C:\Users\user\.cache\kagglehub\datasets\akash2sharma\tiny-imagenet\versions\1\tiny-imagenet-200\tiny-imagenet-200" ,
     # r"D:\Document\Project\Dataset",
     '--use-kd',
     '--use-centroid',
-    '--use-masking'
+    '--use-masking',
 ]
 # 第二個指令 (線性分類器評估)
 cmd2 = [
-    "python", "eval_cls_imagenet.py", 
-    "--pretrained", r"save\pcl_csim_mask_kd\tinyimagenet\train\20250407\model_best.pth.tar",  # 更新模型檔路徑
+    "python", "eval_cls_imagenet_ratio.py", 
+    "--pretrained", r"save\dcbcl\tinyimagenet\train\20250522\model_best.pth.tar",  # 更新模型檔路徑
     # "--pretrained", r"C:\Users\k3866\Documents\Projects\Dual_Centroid_Contrastive_Knowledge_Distillation\checkpoint\pcl\train\checkpoint_0399.pth.tar",  # 更新模型檔路徑
     "-a", "resnet50", 
     "--lr", "0.01",
     "--batch-size", "256",
     "--epochs","200",
     "--workers", "12",
+    '--patience','20',#early stopping
     "--id", "PCMK",
     "--dataset","TinyImageNet",
-    "--exp-dir",r"save\pcl_csim_mask_kd\tinyimagenet\val",
+    "--exp-dir",r"save\dcbcl\tinyimagenet\val",
     r"C:\Users\user\.cache\kagglehub\datasets\akash2sharma\tiny-imagenet\versions\1\tiny-imagenet-200\tiny-imagenet-200" 
     # r"D:\Document\Project\Dataset",
 ]
@@ -175,13 +176,13 @@ cmd8 = [
 try:
     # print("執行第一個指令 (PCMK 訓練)...")
     # subprocess.run(cmd1, check=True)  # 執行第一個指令
-    # print("第一個指令執行完成，執行第二個指令 (線性分類器評估)...")
-    # subprocess.run(cmd2, check=True)  # 執行第二個指令
-    # print("第二個指令執行完成")
-    print("執行第三個指令 (PCMK 訓練)...")
-    subprocess.run(cmd3, check=True)  # 執行第一個指令
-    print("第三個指令執行完成，執行第四個指令 (線性分類器評估)...")
-    subprocess.run(cmd4, check=True)  # 執行第二個指令
+    print("第一個指令執行完成，執行第二個指令 (線性分類器評估)...")
+    subprocess.run(cmd2, check=True)  # 執行第二個指令
+    print("第二個指令執行完成")
+    # print("執行第三個指令 (PCMK 訓練)...")
+    # subprocess.run(cmd3, check=True)  # 執行第一個指令
+    # print("第三個指令執行完成，執行第四個指令 (線性分類器評估)...")
+    # subprocess.run(cmd4, check=True)  # 執行第二個指令
     # print("第四個指令執行完成")
     # print("執行第五個指令 (PCMK 訓練)...")
     # subprocess.run(cmd5, check=True)  # 執行第一個指令

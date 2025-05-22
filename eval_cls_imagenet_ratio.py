@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from resnet import StudentResNet50,student_resnet50
 
+from early_stopping import EarlyStopping
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -100,6 +101,10 @@ parser.add_argument('--exp-dir', default='experiment_pcl', type=str,
 parser.add_argument('--student-ratio', default='60%', type=str,
                     choices=['80%', '60%', '40%', '20%'],
                     help='Student network block ratio')
+
+# early stopping
+parser.add_argument('--patience', default=20, type=int,
+                    help='Number of epochs to wait for improvement before early stopping (default: 20)')
 
 def main():
     args = parser.parse_args()
@@ -299,6 +304,7 @@ def main_worker(gpu, ngpus_per_node, args):
     best_precision = 0.0
     best_conf_matrix = None
     best_class_report = ""
+
     # Data loading code
     # traindir = os.path.join(args.data, 'train')
     # valdir = os.path.join(args.data, 'val')
@@ -402,6 +408,7 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
     wandb.config.update({"size": args.size}, allow_val_change=True)
+
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
@@ -421,6 +428,12 @@ def main_worker(gpu, ngpus_per_node, args):
     if args.evaluate:
         validate(val_loader, model, criterion, args)
         return
+
+    early_stopping = EarlyStopping(
+        patience=args.patience,
+        verbose=True,
+        path=os.path.join(args.exp_dir, 'earlystop_best_loss.pth')
+    )
 
     for epoch in range(args.start_epoch, args.epochs):
 
@@ -458,7 +471,12 @@ def main_worker(gpu, ngpus_per_node, args):
             # else:
             #     class_names = [str(i) for i in range(args.num_classes)]
             # wandb.sklearn.plot_confusion_matrix(all_targets, all_preds, class_names)
-
+        
+        # Early Stopping check
+        early_stopping(eval_loss, model)
+        if early_stopping.early_stop:
+            print("Early stopping triggered.")
+            break
 
         wandb.log({
             "epoch":epoch,
