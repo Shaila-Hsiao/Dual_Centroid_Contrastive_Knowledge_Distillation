@@ -19,8 +19,8 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision.models as models
 # import tensorboard_logger as tb_logger
-# import wandb
-# import wandb.sklearn
+import wandb
+import wandb.sklearn
 
 from tqdm import tqdm
 from sklearn.metrics import classification_report, confusion_matrix, precision_score, recall_score, f1_score
@@ -103,7 +103,7 @@ parser.add_argument('--student-ratio', default='60%', type=str,
 
 def main():
     args = parser.parse_args()
-    # wandb.init(project="Baseline",config=args,name=f"Cls_{args.id}_{args.arch}_{args.dataset}_{args.epochs}",tags=[f"{args.id}",f"{args.dataset}","Classification","mask_proportation"])
+    wandb.init(project="Baseline",config=args,name=f"Cls_{args.id}_{args.arch}_{args.dataset}_{args.epochs}",tags=[f"{args.id}",f"{args.dataset}","Classification","mask_proportation"])
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -180,7 +180,7 @@ def main_worker(gpu, ngpus_per_node, args):
         args.num_classes = 100
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
-    # wandb.config.update({"num_classes": args.num_classes}, allow_val_change=True)
+    wandb.config.update({"num_classes": args.num_classes}, allow_val_change=True)
 
     print("=> creating student model (custom StudentResNet50)")
     student_block_configs = {
@@ -294,6 +294,9 @@ def main_worker(gpu, ngpus_per_node, args):
     cudnn.benchmark = True
 
     best_f1 = 0.0
+    best_acc = 0.0
+    best_recall = 0.0
+    best_precision = 0.0
     best_conf_matrix = None
     best_class_report = ""
     # Data loading code
@@ -398,7 +401,7 @@ def main_worker(gpu, ngpus_per_node, args):
         )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
-    # wandb.config.update({"size": args.size}, allow_val_change=True)
+    wandb.config.update({"size": args.size}, allow_val_change=True)
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     else:
@@ -413,7 +416,7 @@ def main_worker(gpu, ngpus_per_node, args):
        num_workers=args.workers, pin_memory=True)
     
     class_names = val_dataset.classes
-    # wandb.config.update({"class_names": class_names})
+    wandb.config.update({"class_names": class_names})
 
     if args.evaluate:
         validate(val_loader, model, criterion, args)
@@ -432,11 +435,23 @@ def main_worker(gpu, ngpus_per_node, args):
         eval_loss, eval_acc1, eval_acc5, precision, recall, f1, class_report, conf_matrix, all_targets, all_preds = \
         validate(val_loader, model, criterion, args, epoch)
         
-            
-        if f1 > best_f1:
+        # check if f1 the best?
+        is_best = f1 > best_f1
+        if is_best:
             best_f1 = f1
-            save_best_results(args, epoch, f1, class_report, conf_matrix,val_dataset)
+            best_acc = eval_acc1
+            best_recall = recall
+            best_precision = precision
+            save_best_results(args, epoch, f1, class_report, conf_matrix, val_dataset)
 
+            # wandb log best performance
+            wandb.log({
+                "best/epoch": epoch,
+                "best/f1": best_f1,
+                "best/accuracy": best_acc,
+                "best/precision": best_precision,
+                "best/recall": best_recall,
+            })
             # # wandb confusion matrix
             # if hasattr(val_loader.dataset, 'classes'):
             #     class_names = val_loader.dataset.classes
@@ -444,18 +459,20 @@ def main_worker(gpu, ngpus_per_node, args):
             #     class_names = [str(i) for i in range(args.num_classes)]
             # wandb.sklearn.plot_confusion_matrix(all_targets, all_preds, class_names)
 
-        # wandb.log({
-        #     "epoch":epoch,
-        #     "training_loss":train_loss,
-        #     "training_acc1":train_acc1,
-        #     "training_acc5":train_acc5,
-        #     "validate_loss":eval_loss,
-        #     "validate_acc1":eval_acc1,
-        #     "validate_acc5":eval_acc5,
-        #     "validate_precision": precision,
-        #     "validate_recall": recall,
-        #     "validate_f1": f1,
-        # })
+
+        wandb.log({
+            "epoch":epoch,
+            "training_loss":train_loss,
+            "training_acc1":train_acc1,
+            "training_acc5":train_acc5,
+            "validate_loss":eval_loss,
+            "validate_acc1":eval_acc1,
+            "validate_acc5":eval_acc5,
+            "validate_precision": precision,
+            "validate_recall": recall,
+            "validate_f1": f1,
+            
+        })
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             # if (epoch + 1) % 5 == 0:
@@ -464,7 +481,7 @@ def main_worker(gpu, ngpus_per_node, args):
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'optimizer' : optimizer.state_dict(),
-            },is_best=True, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
+            },is_best=is_best, filename='{}/checkpoint_{:04d}.pth.tar'.format(args.exp_dir, epoch))
             if epoch == args.start_epoch:
                 sanity_check(model.state_dict(), args.pretrained)
 
