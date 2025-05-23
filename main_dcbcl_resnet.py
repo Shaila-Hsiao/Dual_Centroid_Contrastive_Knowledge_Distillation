@@ -26,7 +26,7 @@ from resnet import student_resnet50
 
 
 import torch.nn.functional as F
-# import wandb
+import wandb
 import time
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -131,10 +131,10 @@ parser.add_argument('--student-ratio', default='60%', type=str,
 def main():
     args = parser.parse_args()
     # id(task)_arch_dataset_epochs
-    # wandb.init(project="Baseline", 
-    #            config=args, 
-    #            name=f"Pretrained_{args.id}_{args.arch}_{args.batch_size}_{args.mask_mode}_Student_{args.alpha}_{args.dataset}_{args.epochs}"
-    #            ,tags=[f"{args.id}",f"{args.dataset}","Pretrained",f"{args.mask_mode}"])
+    wandb.init(project="Baseline", 
+               config=args, 
+               name=f"Pretrained_{args.id}_{args.arch}_{args.batch_size}_{args.mask_mode}_Student_{args.alpha}_{args.dataset}_{args.epochs}"
+               ,tags=[f"{args.id}",f"{args.dataset}","Pretrained",f"{args.mask_mode}"])
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -159,7 +159,7 @@ def main():
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
 
-    #wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
+    wandb.config.update({"num_cluster": args.num_cluster,"pcl_r": args.pcl_r,"num_classes":args.num_classes}, allow_val_change=True)
 
     args.num_cluster = args.num_cluster.split(',')
 
@@ -265,7 +265,7 @@ def main_worker(gpu, ngpus_per_node, args):
         )
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
-    # wandb.config.update({"size": args.size}, allow_val_change=True)
+    wandb.config.update({"size": args.size}, allow_val_change=True)
     # traindir = os.path.join(args.data, 'train')
     # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
     #                                  std=[0.229, 0.224, 0.225])
@@ -542,16 +542,16 @@ def train(train_loader, model, teacher_model,criterion, optimizer, epoch, args, 
         if i % args.print_freq == 0:
             progress.display(i)
 
-    # wandb.log({
-    #     "epoch": epoch,
-    #     "total_loss": total_losses.avg,
-    #     "info_nce_loss": info_losses.avg,
-    #     "proto_nce_loss": proto_losses.avg,
-    #     "centroid_loss": centroid_losses.avg,
-    #     "kd_loss":kd_losses.avg,
-    #     "accuracy_inst": acc_inst.avg,
-    #     "accuracy_proto": acc_proto.avg,
-    # })
+    wandb.log({
+        "epoch": epoch,
+        "total_loss": total_losses.avg,
+        "info_nce_loss": info_losses.avg,
+        "proto_nce_loss": proto_losses.avg,
+        "centroid_loss": centroid_losses.avg,
+        "kd_loss":kd_losses.avg,
+        "accuracy_inst": acc_inst.avg,
+        "accuracy_proto": acc_proto.avg,
+    })
     return total_losses.avg  # 加在 train() 函數最後一行
 
 # compute class centroid

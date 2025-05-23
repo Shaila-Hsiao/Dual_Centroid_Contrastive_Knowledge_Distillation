@@ -135,9 +135,9 @@ def main():
 
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
     
-    args.tb_folder = 'Linear_eval/{}_tensorboard'.format(args.id)
-    if not os.path.isdir(args.tb_folder):
-        os.makedirs(args.tb_folder)
+    # args.tb_folder = 'Linear_eval/{}_tensorboard'.format(args.id)
+    # if not os.path.isdir(args.tb_folder):
+    #     os.makedirs(args.tb_folder)
         
     ngpus_per_node = torch.cuda.device_count()
     if args.multiprocessing_distributed:
@@ -448,6 +448,20 @@ def main_worker(gpu, ngpus_per_node, args):
         eval_loss, eval_acc1, eval_acc5, precision, recall, f1, class_report, conf_matrix, all_targets, all_preds = \
         validate(val_loader, model, criterion, args, epoch)
         
+
+        log_data = {
+            "epoch": epoch,
+            "training_loss": train_loss,
+            "training_acc1": train_acc1,
+            "training_acc5": train_acc5,
+            "validate_loss": eval_loss,
+            "validate_acc1": eval_acc1,
+            "validate_acc5": eval_acc5,
+            "validate_precision": precision,
+            "validate_recall": recall,
+            "validate_f1": f1,
+        }
+        
         # check if f1 the best?
         is_best = f1 > best_f1
         if is_best:
@@ -458,13 +472,14 @@ def main_worker(gpu, ngpus_per_node, args):
             save_best_results(args, epoch, f1, class_report, conf_matrix, val_dataset)
 
             # wandb log best performance
-            wandb.log({
+            log_data.update({
                 "best/epoch": epoch,
                 "best/f1": best_f1,
                 "best/accuracy": best_acc,
                 "best/precision": best_precision,
                 "best/recall": best_recall,
             })
+
             # # wandb confusion matrix
             # if hasattr(val_loader.dataset, 'classes'):
             #     class_names = val_loader.dataset.classes
@@ -477,20 +492,7 @@ def main_worker(gpu, ngpus_per_node, args):
         if early_stopping.early_stop:
             print("Early stopping triggered.")
             break
-
-        wandb.log({
-            "epoch":epoch,
-            "training_loss":train_loss,
-            "training_acc1":train_acc1,
-            "training_acc5":train_acc5,
-            "validate_loss":eval_loss,
-            "validate_acc1":eval_acc1,
-            "validate_acc5":eval_acc5,
-            "validate_precision": precision,
-            "validate_recall": recall,
-            "validate_f1": f1,
-            
-        })
+        wandb.log(log_data)
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             # if (epoch + 1) % 5 == 0:
